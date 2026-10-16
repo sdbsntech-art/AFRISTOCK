@@ -23,8 +23,9 @@ test('rejects remote database URLs', () => {
   );
 });
 
-test('refuses to run the API on Vercel', () => {
-  assert.throws(() => getSqlitePath({ VERCEL: '1' }), /ne peut pas fonctionner sur Vercel/);
+test('supports running in cloud and local environments without blocking', () => {
+  const vercelPath = getSqlitePath({ VERCEL: '1' });
+  assert.ok(vercelPath.endsWith('afristock.sqlite'));
 });
 
 test('binds the local API only to loopback interfaces', () => {

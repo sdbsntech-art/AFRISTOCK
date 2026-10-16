@@ -601,6 +601,56 @@ tbody tr:hover, .data-table tr:hover td { background: #f8fafc; }
 .auth-form { display: flex; flex-direction: column; gap: 12px; }
 .google-box { display: flex; justify-content: center; margin-top: 12px; }
 .muted-note { color: var(--muted); font-size: 0.86rem; margin: 0; }
+.auth-tabs {
+  display: flex;
+  background: #f1f5f9;
+  padding: 4px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  gap: 4px;
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--muted, #64748b);
+  font-weight: 600;
+  font-size: 0.92rem;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.auth-tab.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.auth-switch {
+  text-align: center;
+  margin-top: 14px;
+  font-size: 0.9rem;
+  color: var(--muted, #64748b);
+}
+
+.link-button {
+  background: none;
+  border: none;
+  color: var(--primary, #047857);
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  font-size: inherit;
+  transition: color 0.15s ease;
+}
+
+.link-button:hover {
+  color: #065f46;
+}
 
 .error-box {
   border: 1px solid #fecaca;

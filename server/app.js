@@ -20,6 +20,7 @@ const app = express();
 const sessionStore = new SqliteSessionStore(openSqlite());
 
 app.disable('x-powered-by');
+app.set('trust proxy', 1);
 
 // Normalise API URLs with or without the /api prefix.
 app.use((req, _res, next) => {
@@ -70,9 +71,18 @@ app.use((req, res, next) => {
   const origin = req.get('origin');
   if (!origin) return next(); // Requêtes non-navigateur (curl, tests internes).
 
+  let originHost = '';
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    originHost = '';
+  }
+  const requestHost = req.get('host') || req.headers['x-forwarded-host'] || '';
+  const isSameHost = Boolean(originHost && requestHost && originHost.toLowerCase() === requestHost.toLowerCase());
+
   const originKeyed = originKey(origin);
-  const requestKeyed = originKey(`${req.protocol}://${req.get('host') || ''}`);
-  const isSameOrigin = Boolean(requestKeyed) && requestKeyed === originKeyed;
+  const requestKeyed = originKey(`${req.protocol}://${requestHost}`);
+  const isSameOrigin = (Boolean(requestKeyed) && requestKeyed === originKeyed) || isSameHost;
   const isAllowedOrigin = Boolean(originKeyed) && allowedOriginKeys.has(originKeyed);
   // En développement uniquement : autoriser les origines localhost (vite dev/preview sur n'importe quel port).
   const isLocalDevOrigin = process.env.NODE_ENV !== 'production' && (() => {

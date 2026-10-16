@@ -33,39 +33,33 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
   const [pending, setPending] = useState(false);
   const [googleClientId, setGoogleClientId] = useState('');
   const [setupRequired, setSetupRequired] = useState(false);
-  const [setupBlocked, setSetupBlocked] = useState(false);
-  const [setupError, setSetupError] = useState('');
-  const [checkingSetup, setCheckingSetup] = useState(true);
-  const [setupCheckKey, setSetupCheckKey] = useState(0);
   const googleBox = useRef(null);
 
   useEffect(() => {
     let active = true;
-    setCheckingSetup(true);
-    setSetupError('');
     apiRequest('/auth/status')
       .then((data) => {
         if (!active) return;
-        setSetupRequired(Boolean(data.setupRequired));
-        setSetupBlocked(Boolean(data.setupBlocked));
-        setMode(data.setupRequired ? 'signup' : 'login');
+        const req = Boolean(data?.setupRequired);
+        setSetupRequired(req);
+        if (req) {
+          setMode('signup');
+        }
       })
-      .catch((err) => {
-        if (!active) return;
-        setSetupError(err.message || 'API locale indisponible.');
-      })
-      .finally(() => {
-        if (active) setCheckingSetup(false);
+      .catch(() => {
+        // En cas d'erreur réseau ou API, on ne bloque jamais le formulaire.
       });
+
     apiRequest('/auth/google-config')
       .then((data) => {
-        if (active) setGoogleClientId(data.clientId || '');
+        if (active) setGoogleClientId(data?.clientId || '');
       })
       .catch(() => {
         if (active) setGoogleClientId('');
       });
+
     return () => { active = false; };
-  }, [setupCheckKey]);
+  }, []);
 
   useEffect(() => {
     if (!googleClientId || !googleBox.current || mode === 'signup') return undefined;
@@ -128,7 +122,13 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
         await onLogin(identifier, password);
       }
     } catch (err) {
-      setError(err.message || 'Échec de l’authentification');
+      let message = err.message || 'Échec de l’authentification';
+      if (message.includes('NOT_FOUND') || message.includes('404')) {
+        message = 'Serveur API indisponible (404). Vérifiez que le serveur AfriStock est démarré.';
+      } else if (message.includes('Failed to fetch') || message.includes('NetworkError')) {
+        message = 'Connexion au serveur impossible. Vérifiez votre connexion ou que le serveur local est actif.';
+      }
+      setError(message);
     } finally {
       setPending(false);
     }
@@ -144,31 +144,38 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
             <div className="brand-mark large">A</div>
           )}
           <div className="brand-name">AfriStock</div>
-          <p>Stock, caisse et ventes — enregistrés sur cet ordinateur.</p>
+          <p>Stock, caisse et ventes — gestion intelligente et sécurisée.</p>
         </div>
 
-        {checkingSetup ? (
-          <p className="muted-note" role="status">Vérification…</p>
-        ) : setupError ? (
-          <div className="error-box setup-error" role="alert">
-            <p>Impossible de vérifier le compte local. Le formulaire reste bloqué pour éviter une connexion à la mauvaise installation.</p>
-            <p>{setupError}</p>
-            <button type="button" className="secondary-button" onClick={() => setSetupCheckKey((key) => key + 1)}>
-              Réessayer
-            </button>
-          </div>
-        ) : setupRequired ? (
-          <div className="setup-notice" role="status">
-            Première utilisation : créez le compte propriétaire. Ensuite, vous pourrez ajouter des vendeurs.
-          </div>
-        ) : setupBlocked ? (
-          <div className="setup-notice" role="status">
-            Aucun compte n’est encore créé. Lancez l’application en local pour initialiser le logiciel.
-          </div>
-        ) : null}
+        <div className="auth-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'login'}
+            className={`auth-tab ${mode === 'login' ? 'active' : ''}`}
+            onClick={() => { setMode('login'); setError(''); }}
+          >
+            Se connecter
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === 'signup'}
+            className={`auth-tab ${mode === 'signup' ? 'active' : ''}`}
+            onClick={() => { setMode('signup'); setError(''); }}
+          >
+            Créer un compte
+          </button>
+        </div>
 
-        {!checkingSetup && !setupError && !setupBlocked && <form className="auth-form" onSubmit={handleSubmit}>
-          {mode === 'signup' && setupRequired && (
+        {mode === 'signup' && setupRequired && (
+          <div className="setup-notice" role="status">
+            Première utilisation : créez votre compte administrateur pour initialiser la boutique.
+          </div>
+        )}
+
+        <form className="auth-form" onSubmit={handleSubmit}>
+          {mode === 'signup' && (
             <>
               <div className="form-grid two-columns-grid">
                 <label>Prénom<input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} required /></label>
@@ -193,7 +200,7 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
 
           {mode === 'login' && (
             <label>Email ou identifiant
-              <input value={identifier} onChange={(e) => setIdentifier(e.target.value)} required autoComplete="username" />
+              <input value={identifier} onChange={(e) => setIdentifier(e.target.value)} required autoComplete="username" autoFocus />
             </label>
           )}
 
@@ -208,15 +215,33 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
               maxLength={256}
             />
           </label>
-          {error && <div className="error-box">{error}</div>}
-          <button type="submit" className="primary-button" disabled={pending || checkingSetup || (mode === 'signup' && !setupRequired) || setupBlocked}>
+
+          {error && <div className="error-box" role="alert">{error}</div>}
+
+          <button type="submit" className="primary-button" disabled={pending}>
             {pending ? 'Patientez…' : mode === 'login' ? 'Se connecter' : 'Créer mon compte'}
           </button>
-        </form>}
+        </form>
 
-        {!checkingSetup && !setupError && !setupRequired && !setupBlocked && googleClientId
-          ? <div ref={googleBox} className="google-box" />
-          : null}
+        <div className="auth-switch">
+          {mode === 'login' ? (
+            <p>
+              Nouveau sur AfriStock ?{' '}
+              <button type="button" className="link-button" onClick={() => { setMode('signup'); setError(''); }}>
+                Créer un compte
+              </button>
+            </p>
+          ) : (
+            <p>
+              Vous possédez déjà un compte ?{' '}
+              <button type="button" className="link-button" onClick={() => { setMode('login'); setError(''); }}>
+                Se connecter
+              </button>
+            </p>
+          )}
+        </div>
+
+        {mode === 'login' && googleClientId ? <div ref={googleBox} className="google-box" /> : null}
       </div>
     </div>
   );
