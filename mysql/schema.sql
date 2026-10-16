@@ -175,4 +175,4 @@ CREATE TABLE IF NOT EXISTS `activity_logs` (
 -- =====================================================================
 -- 11. INITIALISATION DU COMPTE ADMINISTRATEUR
 -- =====================================================================
--- Le compte initial est créé par database/initMysql.js avec ADMIN_INITIAL_PASSWORD.
+-- Le propriétaire initial est créé par le formulaire de première installation.

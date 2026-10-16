@@ -1,14 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getLocalServerHost, getMySqlConfig, getSessionSecret } from '../server/databaseConfig.js';
+import { getLocalServerHost, getMySqlAdminConfig, getMySqlConfig, getSessionSecret } from '../server/databaseConfig.js';
 
 test('uses local MySQL defaults without remote TLS configuration', () => {
   const config = getMySqlConfig({});
 
   assert.equal(config.host, '127.0.0.1');
   assert.equal(config.database, 'afristock');
+  assert.equal(config.user, 'afristock_app');
   assert.equal(config.connectionLimit, 10);
   assert.equal('ssl' in config, false);
+});
+
+test('uses a separate local MySQL administrator account for initialization', () => {
+  const config = getMySqlAdminConfig({});
+
+  assert.equal(config.host, '127.0.0.1');
+  assert.equal(config.user, 'root');
+  assert.equal(config.database, undefined);
 });
 
 test('rejects remote MySQL hosts and hosted database URLs', () => {

@@ -7,20 +7,18 @@ Le logiciel fonctionne exclusivement sur cet ordinateur : l’API écoute sur `1
 ## Première installation
 
 1. Installez les dépendances avec `npm install` si nécessaire.
-2. Créez votre fichier local de configuration : `Copy-Item .env.example .env`.
-3. Générez un secret de session aléatoire avec `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` puis copiez le résultat dans `SESSION_SECRET` du fichier `.env`. Ne partagez pas ce secret.
-4. Démarrez MySQL dans Laragon et définissez un mot de passe sur le compte MySQL utilisé par l’application ; renseignez-le dans `MYSQL_PASSWORD` du fichier `.env`.
-5. Dans PowerShell, à la racine du projet, lancez `npm run db:init`. Cette commande prépare les tables et ne crée aucun compte, catégorie ou produit.
-6. Lancez `npm run dev`, puis ouvrez `http://127.0.0.1:4173`.
-7. Créez le premier compte propriétaire depuis le formulaire de première installation. Son mot de passe est haché automatiquement. Après cette première inscription, la création publique de comptes est fermée ; l’administrateur peut ensuite gérer les comptes vendeurs.
+2. Démarrez MySQL dans Laragon.
+3. Lancez `npm run db:init` dans PowerShell à la racine du projet. La première initialisation crée `%LOCALAPPDATA%\AfriStock\.env` avec un secret de session et un mot de passe aléatoires, crée un compte MySQL dédié limité à la base AfriStock, puis prépare les tables vides. Par défaut, l’administrateur MySQL Laragon `root` n’a pas de mot de passe ; si le vôtre en a un, créez `%LOCALAPPDATA%\AfriStock\.env` avant l’initialisation et renseignez `MYSQL_ADMIN_USER=root` et `MYSQL_ADMIN_PASSWORD=votre-mot-de-passe`.
+4. Lancez `npm run dev`, puis ouvrez `http://127.0.0.1:4173`.
+5. Créez le premier compte propriétaire depuis le formulaire de première installation. Son mot de passe est haché automatiquement. Après cette première inscription, la création publique de comptes est fermée ; l’administrateur peut ensuite gérer les comptes vendeurs.
 
-Les données de chaque vendeur (catégories, produits, ventes et mouvements) sont limitées à son compte. L’administrateur peut gérer les comptes et superviser leurs stocks. Pour renforcer MySQL local, configure un mot de passe sur le compte MySQL utilisé par l’application et remplace `MYSQL_PASSWORD` dans ton fichier `.env` ; ne publie jamais ce fichier.
+Les données de chaque vendeur (catégories, produits, ventes et mouvements) sont limitées à son compte. L’administrateur peut gérer les comptes et superviser leurs stocks. L’application n’utilise pas le compte MySQL root ; garde `%LOCALAPPDATA%\AfriStock\.env` et les sauvegardes privées et ne les publie jamais.
 
 ## Données neuves et sauvegardes
 
 Les données de démonstration ont été retirées et les bases locales ont été remises à zéro après sauvegarde. La sauvegarde confidentielle a été enregistrée dans `%LOCALAPPDATA%\AfriStock\backups\before-clean-install-20261016`. Garde ce dossier privé ; il contient des informations de compte et des hashes de mots de passe. La base SQLite historique n’est plus utilisée par le site. Ne lance pas l’ancien outil de migration SQLite si tu veux garder l’application vide.
 
-Fais des sauvegardes régulières de la base MySQL avec HeidiSQL ou l’outil de sauvegarde de Laragon. Ne place pas ces sauvegardes dans un dépôt Git, un dossier public ou un service de partage.
+Fais des sauvegardes régulières de la base MySQL avec HeidiSQL ou l’outil de sauvegarde de Laragon. Ne place pas ces sauvegardes dans un dépôt Git, un dossier public ou un service de partage. Les sauvegardes locales AfriStock sont conservées sous `%LOCALAPPDATA%\AfriStock\backups`.
 
 ## Application installable sur téléphone et ordinateur
 

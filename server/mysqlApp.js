@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './loadEnv.js';
 import express from 'express';
 import session from 'express-session';
 import crypto from 'node:crypto';

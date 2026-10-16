@@ -14,23 +14,13 @@ export const getLocalServerHost = (env = process.env) => {
 };
 
 export const getMySqlConfig = (env = process.env) => {
-  if (env.VERCEL === '1' || env.VERCEL_ENV) {
-    throw new Error('AfriStock utilise MySQL local uniquement et ne peut pas fonctionner sur Vercel.');
-  }
-
-  if (env.MYSQL_URL?.trim()) {
-    throw new Error('MYSQL_URL distante est désactivée. Configurez MYSQL_HOST sur 127.0.0.1.');
-  }
-
+  assertLocalDatabaseEnvironment(env);
   const host = env.MYSQL_HOST || '127.0.0.1';
-  if (!loopbackHosts.has(host.toLowerCase())) {
-    throw new Error('Connexion MySQL distante refusée : MYSQL_HOST doit être localhost, 127.0.0.1 ou ::1.');
-  }
 
   return {
     host,
     port: positiveInteger(env.MYSQL_PORT, 3306),
-    user: env.MYSQL_USER || 'root',
+    user: env.MYSQL_USER || 'afristock_app',
     password: env.MYSQL_PASSWORD || '',
     database: env.MYSQL_DATABASE || 'afristock',
     waitForConnections: true,
@@ -43,6 +33,31 @@ export const getMySqlConfig = (env = process.env) => {
     keepAliveInitialDelay: 10000,
     connectTimeout: 15000,
   };
+};
+
+export const getMySqlAdminConfig = (env = process.env) => {
+  assertLocalDatabaseEnvironment(env);
+  return {
+    host: env.MYSQL_HOST || '127.0.0.1',
+    port: positiveInteger(env.MYSQL_PORT, 3306),
+    user: env.MYSQL_ADMIN_USER || 'root',
+    password: env.MYSQL_ADMIN_PASSWORD || '',
+  };
+};
+
+const assertLocalDatabaseEnvironment = (env) => {
+  if (env.VERCEL === '1' || env.VERCEL_ENV) {
+    throw new Error('AfriStock utilise MySQL local uniquement et ne peut pas fonctionner sur Vercel.');
+  }
+
+  if (env.MYSQL_URL?.trim()) {
+    throw new Error('MYSQL_URL distante est désactivée. Configurez MYSQL_HOST sur 127.0.0.1.');
+  }
+
+  const host = env.MYSQL_HOST || '127.0.0.1';
+  if (!loopbackHosts.has(host.toLowerCase())) {
+    throw new Error('Connexion MySQL distante refusée : MYSQL_HOST doit être localhost, 127.0.0.1 ou ::1.');
+  }
 };
 
 export const getSessionSecret = (env = process.env) => {
