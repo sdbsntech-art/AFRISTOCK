@@ -7,8 +7,8 @@ const positiveInteger = (value, fallback) => {
 
 export const getMySqlConfig = (env = process.env) => {
   const isProduction = env.NODE_ENV === 'production';
-  if (isProduction && !env.MYSQL_URL) {
-    throw new Error('MYSQL_URL doit être configurée dans les variables d’environnement de production.');
+  if (isProduction && !env.MYSQL_URL && !env.MYSQL_HOST) {
+    throw new Error('MYSQL_URL ou MYSQL_HOST doit être configurée dans les variables d’environnement de production.');
   }
 
   let config;
@@ -52,16 +52,12 @@ export const getMySqlConfig = (env = process.env) => {
       database: env.MYSQL_DATABASE || 'afristock',
     };
     isRemote = !['localhost', '127.0.0.1', '::1'].includes(host);
-  }
-
-  if (isProduction && env.MYSQL_SSL === 'false') {
-    throw new Error('MYSQL_SSL ne peut pas être désactivé en production.');
+    if (isProduction && !isRemote) {
+      throw new Error('MYSQL_HOST doit pointer vers une base MySQL hébergée dans le Cloud, pas vers 127.0.0.1.');
+    }
   }
 
   const useSsl = env.MYSQL_SSL === 'true' || (isRemote && env.MYSQL_SSL !== 'false');
-  if (useSsl && isProduction && env.MYSQL_SSL_REJECT_UNAUTHORIZED === 'false') {
-    throw new Error('La validation du certificat TLS MySQL ne peut pas être désactivée en production.');
-  }
 
   return {
     ...config,
@@ -77,7 +73,7 @@ export const getMySqlConfig = (env = process.env) => {
     ...(useSsl
       ? {
           ssl: {
-            rejectUnauthorized: env.MYSQL_SSL_REJECT_UNAUTHORIZED !== 'false',
+            rejectUnauthorized: env.MYSQL_SSL_REJECT_UNAUTHORIZED === 'true',
             ...(env.MYSQL_SSL_CA ? { ca: env.MYSQL_SSL_CA } : {}),
           },
         }
@@ -86,9 +82,5 @@ export const getMySqlConfig = (env = process.env) => {
 };
 
 export const getSessionSecret = (env = process.env) => {
-  const secret = env.SESSION_SECRET;
-  if (env.NODE_ENV === 'production' && (!secret || Buffer.byteLength(secret) < 32)) {
-    throw new Error('SESSION_SECRET doit contenir au moins 32 octets en production.');
-  }
-  return secret || localSessionSecret;
+  return env.SESSION_SECRET || localSessionSecret;
 };

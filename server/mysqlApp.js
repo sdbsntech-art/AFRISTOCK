@@ -33,6 +33,14 @@ const sessionStore = new MySQLStore({
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
+// Normalisation de l'URL pour supporter Vercel serverless avec ou sans préfixe /api
+app.use((req, _res, next) => {
+  if (!req.url.startsWith('/api')) {
+    req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);
+  }
+  next();
+});
+
 app.use((req, res, next) => {
   res.set({
     'X-Content-Type-Options': 'nosniff',
