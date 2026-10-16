@@ -1,20 +1,21 @@
 import crypto from 'node:crypto';
+import { promisify } from 'node:util';
+
+const scrypt = promisify(crypto.scrypt);
+
+const CURRENT_PARAMS = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 
 /**
  * Hash a password using scrypt with a unique cryptographically secure salt.
  * Output format: scrypt$v=1$N=32768$r=8$p=1$<salt_hex>$<derived_key_hex>
+ * Asynchrone pour ne jamais bloquer la boucle d'événements du serveur.
  */
-export const hashPassword = (password) => {
+export const hashPassword = async (password) => {
   if (!password || typeof password !== 'string') {
     throw new Error('Le mot de passe doit être une chaîne non vide.');
   }
   const salt = crypto.randomBytes(16).toString('hex');
-  const key = crypto.scryptSync(password, salt, 64, {
-    N: 32768,
-    r: 8,
-    p: 1,
-    maxmem: 64 * 1024 * 1024,
-  });
+  const key = await scrypt(password, salt, 64, CURRENT_PARAMS);
   return `scrypt$v=1$N=32768$r=8$p=1$${salt}$${key.toString('hex')}`;
 };
 
@@ -35,7 +36,7 @@ export const isLegacyScryptHash = (stored) => {
 /**
  * Verify a plain-text password against a stored hash using constant-time comparison.
  */
-export const verifyPassword = (password, stored) => {
+export const verifyPassword = async (password, stored) => {
   if (!password || typeof password !== 'string' || !stored || typeof stored !== 'string') return false;
 
   // Legacy format scrypt:salt:hash
@@ -43,7 +44,7 @@ export const verifyPassword = (password, stored) => {
     if (!isLegacyScryptHash(stored)) return false;
     const parts = stored.split(':');
     const [, salt, hash] = parts;
-    const actual = crypto.scryptSync(password, salt, 64);
+    const actual = await scrypt(password, salt, 64);
     const expected = Buffer.from(hash, 'hex');
     return expected.length === actual.length && crypto.timingSafeEqual(actual, expected);
   }
@@ -55,12 +56,7 @@ export const verifyPassword = (password, stored) => {
     const parts = stored.split('$');
     const salt = parts[5];
     const hash = parts[6];
-    const actual = crypto.scryptSync(password, salt, 64, {
-      N: 32768,
-      r: 8,
-      p: 1,
-      maxmem: 64 * 1024 * 1024,
-    });
+    const actual = await scrypt(password, salt, 64, CURRENT_PARAMS);
     const expected = Buffer.from(hash, 'hex');
     return crypto.timingSafeEqual(actual, expected);
   }

@@ -7,16 +7,32 @@ const currentMonth = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 };
 
+const escapeHtml = (value) => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
+
+const safeImageSrc = (value) => {
+  const src = String(value || '').trim();
+  return /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(src)
+  || /^https:\/\/lh3\.googleusercontent\.com\//i.test(src)
+    ? escapeHtml(src)
+    : '';
+};
+
 const reportHtml = (report) => {
   const seller = report.seller || {};
   const analysis = report.analysis || {};
-  const comments = (analysis.comments || []).map((item) => `<p>${item}</p>`).join('');
-  const recos = (analysis.recommendations || []).map((item) => `<li>${item}</li>`).join('');
-  const tops = (report.current?.topProducts || []).map((item) => `<tr><td>${item.name}</td><td>${item.category || ''}</td><td>${item.total_quantity}</td></tr>`).join('');
+  const comments = (analysis.comments || []).map((item) => `<p>${escapeHtml(item)}</p>`).join('');
+  const recos = (analysis.recommendations || []).map((item) => `<li>${escapeHtml(item)}</li>`).join('');
+  const tops = (report.current?.topProducts || []).map((item) => `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.category || '')}</td><td>${escapeHtml(item.total_quantity)}</td></tr>`).join('');
   const created = seller.created_at ? new Date(seller.created_at).toLocaleDateString('fr-FR') : '—';
+  const logoSrc = safeImageSrc(seller.logo);
   return `<!doctype html>
 <html lang="fr"><head><meta charset="utf-8" />
-<title>Rapport ${report.monthLabel} — ${seller.shop_name || 'AfriStock'}</title>
+<title>Rapport ${escapeHtml(report.monthLabel)} — ${escapeHtml(seller.shop_name || 'AfriStock')}</title>
 <style>
   body { font-family: Georgia, "Times New Roman", serif; color: #122033; margin: 0; background: #e8eef7; }
   .sheet { max-width: 860px; margin: 24px auto; background: #fff; padding: 42px 48px; box-shadow: 0 18px 50px rgba(18,32,51,.12); }
@@ -41,27 +57,27 @@ const reportHtml = (report) => {
       <div>
         <h1>Rapport mensuel vendeur</h1>
         <div class="meta">
-          ${seller.shop_name || 'AfriStock'} · ${report.monthLabel}<br/>
-          ${seller.first_name || ''} ${seller.last_name || ''}<br/>
-          Identifiant : ${seller.username || '—'} · Email : ${seller.email || '—'}<br/>
-          Téléphone : ${seller.phone || '—'} · Inscription : ${created}
+          ${escapeHtml(seller.shop_name || 'AfriStock')} · ${escapeHtml(report.monthLabel)}<br/>
+          ${escapeHtml(seller.first_name || '')} ${escapeHtml(seller.last_name || '')}<br/>
+          Identifiant : ${escapeHtml(seller.username || '—')} · Email : ${escapeHtml(seller.email || '—')}<br/>
+          Téléphone : ${escapeHtml(seller.phone || '—')} · Inscription : ${escapeHtml(created)}
         </div>
       </div>
-      ${seller.logo ? `<img class="logo" src="${seller.logo}" alt="Logo" />` : ''}
+      ${logoSrc ? `<img class="logo" src="${logoSrc}" alt="Logo" />` : ''}
     </header>
-    <p><em>${analysis.headline || ''}</em></p>
+    <p><em>${escapeHtml(analysis.headline || '')}</em></p>
     <div class="kpis">
-      <div class="kpi"><span>Chiffre d'affaires</span><strong>${formatCurrency(analysis.kpis?.revenue)}</strong></div>
-      <div class="kpi"><span>Marge</span><strong>${formatCurrency(analysis.kpis?.profit)}</strong></div>
-      <div class="kpi"><span>Tickets</span><strong>${analysis.kpis?.tickets || 0}</strong></div>
-      <div class="kpi"><span>Panier moyen</span><strong>${formatCurrency(analysis.kpis?.avgTicket)}</strong></div>
+      <div class="kpi"><span>Chiffre d'affaires</span><strong>${escapeHtml(formatCurrency(analysis.kpis?.revenue))}</strong></div>
+      <div class="kpi"><span>Marge</span><strong>${escapeHtml(formatCurrency(analysis.kpis?.profit))}</strong></div>
+      <div class="kpi"><span>Tickets</span><strong>${escapeHtml(analysis.kpis?.tickets || 0)}</strong></div>
+      <div class="kpi"><span>Panier moyen</span><strong>${escapeHtml(formatCurrency(analysis.kpis?.avgTicket))}</strong></div>
     </div>
     <h2>Commentaire automatique</h2>
     ${comments}
     <h2>Recommandations</h2>
     <ul>${recos}</ul>
     ${tops ? `<h2>Meilleures références</h2><table><thead><tr><th>Produit</th><th>Catégorie</th><th>Qté</th></tr></thead><tbody>${tops}</tbody></table>` : ''}
-    <footer>Émis par ${seller.shop_name || 'AfriStock'} pour ${seller.first_name || ''} ${seller.last_name || ''} · ${new Date().toLocaleString('fr-FR')}</footer>
+    <footer>Émis par ${escapeHtml(seller.shop_name || 'AfriStock')} pour ${escapeHtml(seller.first_name || '')} ${escapeHtml(seller.last_name || '')} · ${escapeHtml(new Date().toLocaleString('fr-FR'))}</footer>
   </div>
 </body></html>`;
 };
@@ -72,7 +88,7 @@ const downloadReport = (report) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `Rapport-${(report.seller?.shop_name || 'AfriStock').replace(/\s+/g, '_')}-${report.month}.html`;
+  link.download = `Rapport-${String(report.seller?.shop_name || 'AfriStock').replace(/[\\/:*?"<>|\r\n]+/g, '').replace(/\s+/g, '_')}-${report.month}.html`;
   document.body.appendChild(link);
   link.click();
   link.remove();

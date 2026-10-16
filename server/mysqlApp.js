@@ -39,8 +39,56 @@ app.use((req, res, next) => {
     'X-Frame-Options': 'DENY',
     'Referrer-Policy': 'no-referrer',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Resource-Policy': 'same-origin',
+    'X-Robots-Tag': 'noindex, nofollow',
+    'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   });
+  if (req.path.startsWith('/api')) res.set('Cache-Control', 'no-store');
   next();
+});
+
+// Protection CSRF (vérification de l'origine) sur toutes les requêtes modifiant l'état.
+const originKey = (value) => {
+  try {
+    const url = new URL(value.includes('://') ? value : `http://${value}`);
+    const hostname = url.hostname === '127.0.0.1' || url.hostname === '[::1]' ? 'localhost' : url.hostname;
+    const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+    return `${hostname}:${port}`;
+  } catch {
+    return null;
+  }
+};
+
+const allowedOriginKeys = new Set(
+  String(process.env.APP_ORIGIN || '')
+    .split(',')
+    .map((entry) => originKey(entry.trim()))
+    .filter(Boolean),
+);
+
+const unsafeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+const isLoopbackHost = (value) => ['localhost', '127.0.0.1', '[::1]'].includes(value);
+app.use((req, res, next) => {
+  if (!unsafeMethods.has(req.method)) return next();
+  const origin = req.get('origin');
+  if (!origin) return next(); // Requêtes non-navigateur (curl, tests internes).
+
+  const originKeyed = originKey(origin);
+  const requestKeyed = originKey(`${req.protocol}://${req.get('host') || ''}`);
+  const isSameOrigin = Boolean(requestKeyed) && requestKeyed === originKeyed;
+  const isAllowedOrigin = Boolean(originKeyed) && allowedOriginKeys.has(originKeyed);
+  // En développement uniquement : autoriser les origines localhost (vite dev/preview sur n'importe quel port).
+  const isLocalDevOrigin = process.env.NODE_ENV !== 'production' && (() => {
+    try {
+      return isLoopbackHost(new URL(origin).hostname);
+    } catch {
+      return false;
+    }
+  })();
+
+  if (isSameOrigin || isAllowedOrigin || isLocalDevOrigin) return next();
+  return res.status(403).json({ error: 'Origine de la requête refusée (protection CSRF).' });
 });
 
 app.use(express.json({ limit: '5mb' }));
@@ -60,37 +108,98 @@ app.use(session({
 }));
 
 // Limiteur de tentatives de connexion contre force brute
+// - fenêtre glissante de 15 minutes, 15 tentatives max
+// - clés IP **et** identifiant (contournement par identifiants multiples impossible)
+// - purge périodique pour éviter toute fuite mémoire
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_MAX_ATTEMPTS = 15;
+const AUTH_MAX_KEYS = 20000;
 const authAttempts = new Map();
-const limitAuthAttempts = (req, res, next) => {
-  const key = req.ip;
-  const now = Date.now();
-  const recent = (authAttempts.get(key) || []).filter((time) => now - time < 15 * 60 * 1000);
-  if (recent.length >= 15) {
-    return res.status(429).json({ error: 'Trop de tentatives infructueuses. Réessayez dans 15 minutes.' });
+let lastAuthPrune = 0;
+
+const pruneAuthAttempts = (now) => {
+  if (now - lastAuthPrune < 60 * 1000) return;
+  lastAuthPrune = now;
+  for (const [key, times] of authAttempts) {
+    const recent = times.filter((time) => now - time < AUTH_WINDOW_MS);
+    if (recent.length) authAttempts.set(key, recent);
+    else authAttempts.delete(key);
   }
-  recent.push(now);
-  authAttempts.set(key, recent);
+};
+
+// keyBuilder : fonction optionnelle (req) => string | string[]
+const limitAuthAttempts = (keyBuilder) => (req, res, next) => {
+  const now = Date.now();
+  pruneAuthAttempts(now);
+
+  const built = keyBuilder ? keyBuilder(req) : null;
+  const keys = [`ip:${req.ip}`, ...(Array.isArray(built) ? built : built ? [built] : [])]
+    .map((key) => String(key).slice(0, 300));
+
+  for (const key of keys) {
+    const recent = (authAttempts.get(key) || []).filter((time) => now - time < AUTH_WINDOW_MS);
+    if (recent.length >= AUTH_MAX_ATTEMPTS) {
+      return res.status(429).json({ error: 'Trop de tentatives infructueuses. Réessayez dans 15 minutes.' });
+    }
+  }
+
+  if (authAttempts.size > AUTH_MAX_KEYS) authAttempts.clear();
+
+  for (const key of keys) {
+    const recent = (authAttempts.get(key) || []).filter((time) => now - time < AUTH_WINDOW_MS);
+    recent.push(now);
+    authAttempts.set(key, recent);
+  }
   next();
+};
+
+const loginAttemptKey = (req) => {
+  const identifier = String(req.body?.identifier || '').trim().toLowerCase().slice(0, 254);
+  return identifier ? `login:${identifier}` : null;
 };
 
 const asyncRoute = (handler) => (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 
 const getSessionUser = (req) => req.session?.user || null;
 
-const requireAuth = (req, res, next) => {
-  const user = getSessionUser(req);
-  if (!user) return res.status(401).json({ error: 'Session expirée ou non authentifiée.' });
-  next();
+// Recharge l'utilisateur depuis la base à chaque requête protégée :
+// un compte suspendu, désactivé ou rétrogradé perd ses droits immédiatement
+// (et non à l'expiration du cookie de session, 12 h plus tard).
+const resolveSessionUser = async (req) => {
+  const sessionUser = getSessionUser(req);
+  if (!sessionUser?.id) {
+    return { error: { status: 401, message: 'Session expirée ou non authentifiée.' } };
+  }
+
+  const fresh = await loadUser(sessionUser.id);
+  if (!fresh || fresh.status !== 'active') {
+    await new Promise((resolve) => req.session.destroy(() => resolve()));
+    return { error: { status: 401, message: 'Session expirée ou non authentifiée.' } };
+  }
+
+  const nextUser = publicUser(fresh);
+  if (JSON.stringify(sessionUser) !== JSON.stringify(nextUser)) {
+    req.session.user = nextUser;
+  }
+  return { user: nextUser };
 };
 
-const requireAdmin = (req, res, next) => {
-  const user = getSessionUser(req);
+const requireAuth = asyncRoute(async (req, res, next) => {
+  const { user, error } = await resolveSessionUser(req);
+  if (error) return res.status(error.status).json({ error: error.message });
+  if (!user) return res.status(401).json({ error: 'Session expirée ou non authentifiée.' });
+  next();
+});
+
+const requireAdmin = asyncRoute(async (req, res, next) => {
+  const { user, error } = await resolveSessionUser(req);
+  if (error) return res.status(error.status).json({ error: error.message });
   if (!user) return res.status(401).json({ error: 'Non authentifié.' });
   if (user.role !== 'admin') {
     return res.status(403).json({ error: 'Accès réservé aux administrateurs.' });
   }
   next();
-};
+});
 
 const setSessionUser = (req, user) => {
   req.session.user = publicUser(user);
@@ -151,7 +260,14 @@ const withTransaction = async (callback) => {
 const validId = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0;
 const validNonNegativeInt = (value) => Number.isSafeInteger(Number(value)) && Number(value) >= 0;
 const validText = (value, max = 200) => typeof value === 'string' && value.length <= max;
-const validLogo = (value) => !value || /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(value) || /^https:\/\/lh3\.googleusercontent\.com\//i.test(value);
+// Logo borné en taille pour éviter le remplissage abusif de la base (client : 1,8 Mo max).
+const MAX_LOGO_CHARS = 2600000;
+const validLogo = (value) => {
+  if (!value) return true;
+  if (typeof value !== 'string' || value.length > MAX_LOGO_CHARS) return false;
+  return /^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(value)
+    || /^https:\/\/lh3\.googleusercontent\.com\/[^\s"'<>\\]{1,2048}$/.test(value);
+};
 
 // Helper pour formater les nombres dans les lignes MySQL
 const numericRows = (rows, fields) => rows.map((row) => Object.fromEntries(
@@ -188,8 +304,8 @@ app.get('/api/session', asyncRoute(async (req, res) => {
   res.json({ user: setSessionUser(req, fresh) });
 }));
 
-app.post('/api/login', limitAuthAttempts, asyncRoute(async (req, res, next) => {
-  const identifier = String(req.body?.identifier || '').trim();
+app.post('/api/login', limitAuthAttempts(loginAttemptKey), asyncRoute(async (req, res, next) => {
+  const identifier = String(req.body?.identifier || '').trim().slice(0, 254);
   const pass = String(req.body?.password || '');
 
   if (!identifier || !pass || pass.length > 256) {
@@ -202,7 +318,15 @@ app.post('/api/login', limitAuthAttempts, asyncRoute(async (req, res, next) => {
   );
   const user = rows[0];
 
-  if (!user || !verifyPassword(pass, user.password)) {
+  if (!user || !(await verifyPassword(pass, user.password))) {
+    await logActivity(pool, {
+      userId: user?.id || null,
+      userName: user?.name || 'Inconnu',
+      action: 'LOGIN_FAILED',
+      entityType: 'user',
+      entityId: user?.id || null,
+      description: `Tentative de connexion échouée pour "${identifier}"`,
+    });
     return res.status(401).json({ error: 'Identifiant ou mot de passe incorrect.' });
   }
 
@@ -212,7 +336,7 @@ app.post('/api/login', limitAuthAttempts, asyncRoute(async (req, res, next) => {
 
   // Si ancien hash non standard ou besoin de rehash
   if (!isCurrentPasswordHash(user.password)) {
-    await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashPassword(pass), user.id]);
+    await pool.query('UPDATE users SET password = ? WHERE id = ?', [await hashPassword(pass), user.id]);
   }
 
   try {
@@ -236,7 +360,7 @@ app.post('/api/logout', (req, res) => {
   });
 });
 
-app.post('/api/signup', limitAuthAttempts, asyncRoute(async (req, res, next) => {
+app.post('/api/signup', limitAuthAttempts(), asyncRoute(async (req, res, next) => {
   const firstName = String(req.body?.first_name || '').trim();
   const lastName = String(req.body?.last_name || '').trim();
   const safeName = fullName(firstName, lastName, String(req.body?.name || '').trim());
@@ -292,7 +416,7 @@ app.post('/api/signup', limitAuthAttempts, asyncRoute(async (req, res, next) => 
       safeName,
       username,
       email,
-      hashPassword(password),
+      await hashPassword(password),
       firstName,
       lastName,
       phone,
@@ -321,7 +445,7 @@ app.post('/api/signup', limitAuthAttempts, asyncRoute(async (req, res, next) => 
   }
 }));
 
-app.post('/api/auth/google', limitAuthAttempts, asyncRoute(async (req, res) => {
+app.post('/api/auth/google', limitAuthAttempts(), asyncRoute(async (req, res) => {
   const credential = String(req.body?.credential || '').trim();
   const clientId = process.env.GOOGLE_CLIENT_ID || await getSetting('google_client_id');
   if (!credential) return res.status(400).json({ error: 'Jeton Google manquant.' });
@@ -375,7 +499,7 @@ app.post('/api/auth/change-password', requireAuth, asyncRoute(async (req, res) =
     if (!currentPassword) {
       return res.status(400).json({ error: 'Le mot de passe actuel est requis.' });
     }
-    if (!verifyPassword(currentPassword, user.password)) {
+    if (!(await verifyPassword(currentPassword, user.password))) {
       return res.status(401).json({ error: 'Le mot de passe actuel est incorrect.' });
     }
   }
@@ -384,7 +508,7 @@ app.post('/api/auth/change-password', requireAuth, asyncRoute(async (req, res) =
   if (pwdError) return res.status(400).json({ error: pwdError });
 
   // Hasher de manière ultra-sécurisée avec Scrypt
-  const newHash = hashPassword(newPassword);
+  const newHash = await hashPassword(newPassword);
   await pool.query('UPDATE users SET password = ?, must_change_password = 0 WHERE id = ?', [newHash, user.id]);
 
   await logActivity(pool, {
@@ -539,7 +663,7 @@ app.post('/api/admin/users', requireAdmin, asyncRoute(async (req, res) => {
     safeName,
     username,
     email,
-    hashPassword(rawPassword),
+    await hashPassword(rawPassword),
     role,
     firstName,
     lastName,
@@ -634,17 +758,17 @@ app.post('/api/admin/users/:id/reset-password', requireAdmin, asyncRoute(async (
 
   // Génération automatique d'un mot de passe sécurisé à haute entropie
   const tempPassword = generateSecurePassword(12);
-  const hashed = hashPassword(tempPassword);
+  const hashed = await hashPassword(tempPassword);
 
   // Mettre à jour et forcer le changement à la prochaine connexion
   await pool.query('UPDATE users SET password = ?, must_change_password = 1 WHERE id = ?', [hashed, userId]);
 
-  // Enregistrer dans la table d'audit password_resets
+  // Enregistrer dans la table d'audit password_resets (jamais le mot de passe en clair)
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
   await pool.query(`
     INSERT INTO password_resets (user_id, token, temp_password, expires_at)
-    VALUES (?, ?, ?, ?)
-  `, [userId, crypto.randomBytes(24).toString('hex'), tempPassword, expiresAt]);
+    VALUES (?, ?, NULL, ?)
+  `, [userId, crypto.randomBytes(24).toString('hex'), expiresAt]);
 
   await logActivity(pool, {
     userId: sessionUser.id,
@@ -1186,13 +1310,19 @@ app.post('/api/sales', requireAuth, asyncRoute(async (req, res) => {
   const sessionUser = getSessionUser(req);
   const items = Array.isArray(req.body?.items) ? req.body.items : [];
   if (!items.length) return res.status(400).json({ error: 'Aucun article sélectionné dans le panier.' });
+  if (items.length > 300) return res.status(400).json({ error: 'Panier trop volumineux : 300 lignes maximum par ticket.' });
+
+  const paymentMethod = String(req.body?.payment_method || 'cash')
+    .trim()
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .slice(0, 64) || 'cash';
 
   try {
     const saleResult = await withTransaction(async (conn) => {
       // 1. Créer le ticket de vente lié au vendeur connecté
       const [saleInsert] = await conn.query(
         'INSERT INTO sales (user_id, total_amount, total_profit, items_count, payment_method) VALUES (?, 0, 0, 0, ?)',
-        [sessionUser.id, req.body?.payment_method || 'cash'],
+        [sessionUser.id, paymentMethod],
       );
       const saleId = saleInsert.insertId;
 
@@ -1353,7 +1483,7 @@ app.get('/api/sales', requireAuth, asyncRoute(async (req, res) => {
 
 app.get('/api/dashboard', requireAuth, asyncRoute(async (req, res) => {
   const sessionUser = getSessionUser(req);
-  const sellerId = sessionUser.role === 'admin' && req.query.seller_id
+  const sellerId = sessionUser.role === 'admin' && validId(req.query.seller_id)
     ? Number(req.query.seller_id)
     : (sessionUser.role === 'admin' ? null : sessionUser.id);
 
@@ -1413,7 +1543,7 @@ app.get('/api/dashboard', requireAuth, asyncRoute(async (req, res) => {
 
 app.get('/api/stats', requireAuth, asyncRoute(async (req, res) => {
   const sessionUser = getSessionUser(req);
-  const sellerId = sessionUser.role === 'admin' && req.query.seller_id
+  const sellerId = sessionUser.role === 'admin' && validId(req.query.seller_id)
     ? Number(req.query.seller_id)
     : (sessionUser.role === 'admin' ? null : sessionUser.id);
 
@@ -1531,8 +1661,12 @@ const getMonthStats = async (start, endExclusive, sellerId) => {
 
 app.get('/api/reports/monthly', requireAuth, asyncRoute(async (req, res) => {
   const sessionUser = getSessionUser(req);
-  const targetUserId = sessionUser.role === 'admin' && req.query.seller_id ? Number(req.query.seller_id) : sessionUser.id;
+  const requestedSeller = sessionUser.role === 'admin' && validId(req.query.seller_id)
+    ? Number(req.query.seller_id)
+    : null;
+  const targetUserId = requestedSeller ?? sessionUser.id;
   const seller = publicUser(await loadUser(targetUserId));
+  if (!seller) return res.status(404).json({ error: 'Vendeur introuvable.' });
 
   const bounds = monthBounds(req.query.month);
   const nextMonth = bounds.month === 12 ? 1 : bounds.month + 1;
@@ -1566,36 +1700,54 @@ app.get('/api/reports/monthly', requireAuth, asyncRoute(async (req, res) => {
 // Mouvements de stock
 app.get('/api/stock-movements', requireAuth, asyncRoute(async (req, res) => {
   const sessionUser = getSessionUser(req);
-  const query = sessionUser.role === 'admin' && !req.query.seller_id
+  const targetUserId = sessionUser.role === 'admin'
+    ? (validId(req.query.seller_id) ? Number(req.query.seller_id) : null)
+    : sessionUser.id;
+
+  const query = targetUserId
     ? `
-      SELECT sm.*, p.name AS product_name, u.shop_name, u.name AS user_name
-      FROM stock_movements sm
-      JOIN products p ON p.id = sm.product_id
-      JOIN users u ON u.id = sm.user_id
-      ORDER BY sm.created_at DESC LIMIT 50
-    `
-    : `
       SELECT sm.*, p.name AS product_name
       FROM stock_movements sm
       JOIN products p ON p.id = sm.product_id
       WHERE sm.user_id = ?
       ORDER BY sm.created_at DESC LIMIT 50
+    `
+    : `
+      SELECT sm.*, p.name AS product_name, u.shop_name, u.name AS user_name
+      FROM stock_movements sm
+      JOIN products p ON p.id = sm.product_id
+      JOIN users u ON u.id = sm.user_id
+      ORDER BY sm.created_at DESC LIMIT 50
     `;
 
-  const params = sessionUser.role === 'admin' && !req.query.seller_id
-    ? []
-    : [sessionUser.role === 'admin' && req.query.seller_id ? Number(req.query.seller_id) : sessionUser.id];
-
-  const [rows] = await pool.query(query, params);
+  const [rows] = await pool.query(query, targetUserId ? [targetUserId] : []);
   res.json(rows);
 }));
+
+// 404 JSON pour toute route /api inconnue
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'Route API introuvable.' });
+});
 
 // Gestion globale des erreurs
 app.use((error, _req, res, _next) => {
   console.error(`[API Error] ${error.message}`);
   if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Cet élément existe déjà dans la base de données.' });
   if (error.code === 'ER_ROW_IS_REFERENCED_2') return res.status(409).json({ error: 'Cette donnée est utilisée par d’autres éléments.' });
-  res.status(500).json({ error: error.message || 'Une erreur serveur inattendue est survenue.' });
+  // Erreurs de lecture du corps de requête (JSON invalide, corps trop volumineux)
+  if (error.status && error.status < 500) {
+    const message = error.type === 'entity.too.large'
+      ? 'Requête trop volumineuse.'
+      : 'Requête invalide.';
+    return res.status(error.status).json({ error: message });
+  }
+  // Ne jamais exposer les détails internes (SQL, chemins, variables) en production.
+  const isProduction = process.env.NODE_ENV === 'production';
+  return res.status(500).json({
+    error: isProduction || !error.message
+      ? 'Une erreur serveur inattendue est survenue.'
+      : error.message,
+  });
 });
 
 export const closeSessionStore = () => sessionStore.close();
