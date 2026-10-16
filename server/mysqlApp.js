@@ -27,6 +27,9 @@ const pool = mysql.createPool({
   charset: 'utf8mb4',
   timezone: 'Z',
   dateStrings: true,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
+  connectTimeout: 10000,
 });
 
 pool.on('error', (error) => console.error(`[MySQL] Erreur de connexion au pool : ${error.message}`));
@@ -507,6 +510,7 @@ app.get('/api/admin/users/:id/products', requireAdmin, asyncRoute(async (req, re
 
 // 4. Créer un nouvel utilisateur / vendeur par l'admin
 app.post('/api/admin/users', requireAdmin, asyncRoute(async (req, res) => {
+  const sessionUser = getSessionUser(req);
   const firstName = String(req.body?.first_name || '').trim();
   const lastName = String(req.body?.last_name || '').trim();
   const safeName = fullName(firstName, lastName, String(req.body?.name || '').trim());
@@ -561,6 +565,7 @@ app.post('/api/admin/users', requireAdmin, asyncRoute(async (req, res) => {
 
 // 5. Modifier le profil, statut ou rôle d'un utilisateur par l'admin
 app.put('/api/admin/users/:id', requireAdmin, asyncRoute(async (req, res) => {
+  const sessionUser = getSessionUser(req);
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Identifiant invalide.' });
   const userId = Number(req.params.id);
   const user = await loadUser(userId);
@@ -576,7 +581,7 @@ app.put('/api/admin/users/:id', requireAdmin, asyncRoute(async (req, res) => {
   const status = ['active', 'inactive', 'suspended'].includes(req.body?.status) ? req.body.status : user.status;
 
   // Éviter de désactiver son propre compte admin
-  if (userId === getSessionUser(req).id && status !== 'active') {
+  if (userId === sessionUser.id && status !== 'active') {
     return res.status(400).json({ error: 'Vous ne pouvez pas désactiver votre propre compte administrateur.' });
   }
 
@@ -619,6 +624,7 @@ app.put('/api/admin/users/:id', requireAdmin, asyncRoute(async (req, res) => {
 
 // 6. Réinitialisation automatique et sécurisée du mot de passe par l'administrateur
 app.post('/api/admin/users/:id/reset-password', requireAdmin, asyncRoute(async (req, res) => {
+  const sessionUser = getSessionUser(req);
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Identifiant invalide.' });
   const userId = Number(req.params.id);
   const user = await loadUser(userId);
@@ -657,12 +663,16 @@ app.post('/api/admin/users/:id/reset-password', requireAdmin, asyncRoute(async (
 
 // 7. Supprimer un compte vendeur par l'admin
 app.delete('/api/admin/users/:id', requireAdmin, asyncRoute(async (req, res) => {
+  const sessionUser = getSessionUser(req);
   if (!validId(req.params.id)) return res.status(400).json({ error: 'Identifiant invalide.' });
   const userId = Number(req.params.id);
 
-  if (userId === getSessionUser(req).id) {
+  if (userId === sessionUser.id) {
     return res.status(400).json({ error: 'Impossible de supprimer votre propre compte.' });
   }
+
+  const user = await loadUser(userId);
+  if (!user) return res.status(404).json({ error: 'Utilisateur introuvable.' });
 
   await logActivity(pool, {
     userId: sessionUser.id,
@@ -670,7 +680,7 @@ app.delete('/api/admin/users/:id', requireAdmin, asyncRoute(async (req, res) => 
     action: 'USER_DELETE',
     entityType: 'user',
     entityId: userId,
-    description: `Suppression du compte utilisateur id=${userId}`,
+    description: `Suppression du compte utilisateur "${user.name}" (id=${userId})`,
   });
 
   await pool.query('DELETE FROM users WHERE id = ?', [userId]);
