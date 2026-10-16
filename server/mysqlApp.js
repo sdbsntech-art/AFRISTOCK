@@ -15,7 +15,7 @@ import {
 } from './security.js';
 import { getMySqlConfig, getSessionSecret } from './databaseConfig.js';
 
-// Configuration du pool MySQL (supporte Laragon en local et les bases Cloud en production)
+// Le pool est volontairement limité au serveur MySQL local.
 const pool = mysql.createPool(getMySqlConfig());
 
 pool.on('error', (error) => console.error(`[MySQL] Erreur de connexion au pool : ${error.message}`));
@@ -31,9 +31,8 @@ const sessionStore = new MySQLStore({
 }, pool);
 
 app.disable('x-powered-by');
-app.set('trust proxy', 1);
 
-// Normalisation de l'URL pour supporter Vercel serverless avec ou sans préfixe /api
+// Normalise API URLs with or without the /api prefix.
 app.use((req, _res, next) => {
   if (!req.url.startsWith('/api')) {
     req.url = '/api' + (req.url.startsWith('/') ? req.url : '/' + req.url);

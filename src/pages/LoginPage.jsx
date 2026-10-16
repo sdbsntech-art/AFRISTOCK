@@ -54,7 +54,7 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
     if (!googleClientId || !googleBox.current) return undefined;
 
     const renderButton = () => {
-      if (!window.google?.accounts?.id) return;
+      if (!window.google?.accounts?.id || !googleBox.current) return;
       googleBox.current.innerHTML = '';
       window.google.accounts.id.initialize({
         client_id: googleClientId,

@@ -1,14 +1,34 @@
-const localSessionSecret = 'afristock_super_secret_session_key_2026';
+const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 const positiveInteger = (value, fallback) => {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-// Configuration MySQL locale (Laragon / 127.0.0.1)
+export const getLocalServerHost = (env = process.env) => {
+  const host = env.HOST || '127.0.0.1';
+  if (!loopbackHosts.has(host.toLowerCase())) {
+    throw new Error('AfriStock est configuré en local uniquement : HOST doit rester sur localhost ou 127.0.0.1.');
+  }
+  return host;
+};
+
 export const getMySqlConfig = (env = process.env) => {
+  if (env.VERCEL === '1' || env.VERCEL_ENV) {
+    throw new Error('AfriStock utilise MySQL local uniquement et ne peut pas fonctionner sur Vercel.');
+  }
+
+  if (env.MYSQL_URL?.trim()) {
+    throw new Error('MYSQL_URL distante est désactivée. Configurez MYSQL_HOST sur 127.0.0.1.');
+  }
+
+  const host = env.MYSQL_HOST || '127.0.0.1';
+  if (!loopbackHosts.has(host.toLowerCase())) {
+    throw new Error('Connexion MySQL distante refusée : MYSQL_HOST doit être localhost, 127.0.0.1 ou ::1.');
+  }
+
   return {
-    host: env.MYSQL_HOST || '127.0.0.1',
+    host,
     port: positiveInteger(env.MYSQL_PORT, 3306),
     user: env.MYSQL_USER || 'root',
     password: env.MYSQL_PASSWORD || '',
@@ -26,5 +46,9 @@ export const getMySqlConfig = (env = process.env) => {
 };
 
 export const getSessionSecret = (env = process.env) => {
-  return env.SESSION_SECRET || localSessionSecret;
+  const secret = env.SESSION_SECRET;
+  if (!secret || Buffer.byteLength(secret) < 32) {
+    throw new Error('SESSION_SECRET doit contenir au moins 32 octets aléatoires dans le fichier .env.');
+  }
+  return secret;
 };

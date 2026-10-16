@@ -1,23 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getMySqlConfig, getSessionSecret } from '../server/databaseConfig.js';
+import { getLocalServerHost, getMySqlConfig, getSessionSecret } from '../server/databaseConfig.js';
 
-test('parses hosted MySQL URLs and enables verified TLS in production', () => {
-  const config = getMySqlConfig({
-    NODE_ENV: 'production',
-    MYSQL_URL: 'mysql://stock%40user:p%40ss@db.example.com:3307/afristock',
-  });
-
-  assert.equal(config.host, 'db.example.com');
-  assert.equal(config.port, 3307);
-  assert.equal(config.user, 'stock@user');
-  assert.equal(config.password, 'p@ss');
-  assert.equal(config.database, 'afristock');
-  assert.equal(config.connectionLimit, 1);
-  assert.deepEqual(config.ssl, { rejectUnauthorized: true });
-});
-
-test('keeps local development defaults without enabling TLS', () => {
+test('uses local MySQL defaults without remote TLS configuration', () => {
   const config = getMySqlConfig({});
 
   assert.equal(config.host, '127.0.0.1');
@@ -26,32 +11,29 @@ test('keeps local development defaults without enabling TLS', () => {
   assert.equal('ssl' in config, false);
 });
 
-test('rejects production configuration that would fall back to local MySQL', () => {
-  assert.throws(() => getMySqlConfig({ NODE_ENV: 'production' }), /MYSQL_URL/);
+test('rejects remote MySQL hosts and hosted database URLs', () => {
+  assert.throws(() => getMySqlConfig({ MYSQL_HOST: 'db.example.com' }), /Connexion MySQL distante refusée/);
   assert.throws(
-    () => getMySqlConfig({
-      NODE_ENV: 'production',
-      MYSQL_URL: 'mysql://user:password@localhost/afristock',
-    }),
-    /localhost/,
+    () => getMySqlConfig({ MYSQL_URL: 'mysql://user:password@db.example.com/afristock' }),
+    /MYSQL_URL distante est désactivée/,
   );
 });
 
-test('rejects missing or short production session secrets', () => {
-  assert.throws(() => getSessionSecret({ NODE_ENV: 'production' }), /32 octets/);
+test('refuses to run the MySQL API on Vercel', () => {
+  assert.throws(() => getMySqlConfig({ VERCEL: '1' }), /ne peut pas fonctionner sur Vercel/);
+});
+
+test('binds the local API only to loopback interfaces', () => {
+  assert.equal(getLocalServerHost({}), '127.0.0.1');
+  assert.equal(getLocalServerHost({ HOST: 'localhost' }), 'localhost');
+  assert.throws(() => getLocalServerHost({ HOST: '0.0.0.0' }), /HOST doit rester/);
+});
+
+test('requires a long session secret in every environment', () => {
+  assert.throws(() => getSessionSecret({}), /32 octets/);
   assert.throws(
-    () => getSessionSecret({ NODE_ENV: 'production', SESSION_SECRET: 'too-short' }),
+    () => getSessionSecret({ SESSION_SECRET: 'too-short' }),
     /32 octets/,
   );
-});
-
-test('rejects production settings that disable MySQL TLS verification', () => {
-  assert.throws(
-    () => getMySqlConfig({
-      NODE_ENV: 'production',
-      MYSQL_URL: 'mysql://user:password@db.example.com/afristock',
-      MYSQL_SSL_REJECT_UNAUTHORIZED: 'false',
-    }),
-    /validation du certificat TLS/,
-  );
+  assert.equal(getSessionSecret({ SESSION_SECRET: 'a'.repeat(32) }), 'a'.repeat(32));
 });

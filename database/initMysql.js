@@ -2,16 +2,13 @@ import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import mysql from 'mysql2/promise';
+import { getMySqlConfig } from '../server/databaseConfig.js';
 
-const connectionConfig = {
-  host: process.env.MYSQL_HOST || '127.0.0.1',
-  port: Number(process.env.MYSQL_PORT) || 3306,
-  user: process.env.MYSQL_USER || 'root',
-  password: process.env.MYSQL_PASSWORD || '',
-};
+const { host, port, user, password } = getMySqlConfig();
+const connectionConfig = { host, port, user, password };
 
 export const initializeDatabase = async () => {
-  const dbName = process.env.MYSQL_DATABASE || 'afristock';
+  const dbName = getMySqlConfig().database;
   if (!/^[a-zA-Z0-9_]{1,64}$/.test(dbName)) {
     throw new Error('MYSQL_DATABASE doit contenir uniquement des lettres, chiffres et caractères _ (1 à 64 caractères).');
   }

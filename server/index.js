@@ -1,7 +1,8 @@
 import { app, closeSessionStore, pool } from './mysqlApp.js';
+import { getLocalServerHost } from './databaseConfig.js';
 
 const port = Number(process.env.PORT) || 3001;
-const host = process.env.HOST || '127.0.0.1';
+const host = getLocalServerHost();
 
 let server;
 
