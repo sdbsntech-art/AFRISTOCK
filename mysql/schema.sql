@@ -170,3 +170,54 @@ CREATE TABLE IF NOT EXISTS `activity_logs` (
   KEY `activity_logs_created_idx` (`created_at`),
   CONSTRAINT `activity_logs_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =====================================================================
+-- 11. INITIALISATION DU COMPTE ADMINISTRATEUR (PRODUIT COMMERCIAL NEUF)
+-- =====================================================================
+INSERT IGNORE INTO `users` (`id`, `name`, `username`, `email`, `password`, `role`, `status`, `first_name`, `last_name`, `phone`, `shop_name`, `must_change_password`)
+VALUES (
+  1,
+  'Administrateur AfriStock',
+  'admin',
+  'admin@afristock.com',
+  'scrypt$v=1$N=32768$r=8$p=1$1220e3fe456311a71b009792c8d37ac2$ac65506a4995155ebdacdcc5107c21c43ae9e309e59d8bd917115668a8e3b8d2bfd04d7ace54b1d8253f2ead0d9af8700c6ad1560c2e04e4e2358cbeb00f1d92',
+  'admin',
+  'active',
+  'Admin',
+  'AfriStock',
+  '+225 07 00 00 01',
+  'Direction AfriStock',
+  0
+);
+
+-- =====================================================================
+-- 12. INITIALISATION DES CATÉGORIES STANDARDS (SANS PRODUITS FACTICES)
+-- =====================================================================
+INSERT IGNORE INTO `categories` (`name`, `family`) VALUES
+('Écrans iPhone', 'ecrans'),
+('Écrans Samsung', 'ecrans'),
+('Écrans Xiaomi / Redmi', 'ecrans'),
+('Écrans Huawei', 'ecrans'),
+('Écrans Oppo / Realme', 'ecrans'),
+('Écrans Tecno', 'ecrans'),
+('Écrans Infinix', 'ecrans'),
+('Écrans iTel', 'ecrans'),
+('Écrans Vivo', 'ecrans'),
+('Écrans Google Pixel', 'ecrans'),
+('Écrans Honor', 'ecrans'),
+('Chargeurs iPhone Lightning', 'chargeurs-iphone'),
+('Chargeurs iPhone USB-C', 'chargeurs-iphone'),
+('Chargeurs iPhone MagSafe', 'chargeurs-iphone'),
+('Chargeurs Samsung USB-C', 'chargeurs-samsung'),
+('Chargeurs Samsung Super Fast', 'chargeurs-samsung'),
+('Chargeurs universels', 'chargeurs-autres'),
+('Batteries', 'pieces'),
+('Nappes & flex', 'pieces'),
+('Caméras', 'pieces'),
+('Haut-parleurs', 'pieces'),
+('Boutons', 'pieces'),
+('Connecteurs Lightning', 'connecteurs'),
+('Connecteurs USB-C', 'connecteurs'),
+('Connecteurs Micro-USB', 'connecteurs'),
+('Nappes de charge / dock', 'connecteurs'),
+('Autres accessoires', 'autres');
