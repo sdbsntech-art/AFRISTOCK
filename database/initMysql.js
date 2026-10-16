@@ -2,7 +2,7 @@ import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import mysql from 'mysql2/promise';
-import { DEFAULT_CATEGORIES, DEFAULT_PRODUCTS } from './catalog.js';
+import { DEFAULT_CATEGORIES } from './catalog.js';
 import { hashPassword } from '../server/security.js';
 
 const connectionConfig = {
@@ -75,33 +75,8 @@ export const initializeDatabase = async () => {
     console.log('ℹ️ Compte Administrateur existant (id=' + adminId + ')');
   }
 
-  // 2. Initialiser un compte vendeur de démonstration (Mamadou Diallo)
-  const [sellerRows] = await db.query('SELECT id FROM users WHERE username = ? OR email = ?', ['diallo', 'diallo@afristock.com']);
-  let sellerId;
-  if (sellerRows.length === 0) {
-    const sellerPasswordHash = hashPassword('Diallo@AfriStock2026!');
-    const [result] = await db.query(`
-      INSERT INTO users (name, username, email, password, role, status, first_name, last_name, phone, shop_name, must_change_password)
-      VALUES (?, ?, ?, ?, 'seller', 'active', ?, ?, ?, ?, 0)
-    `, [
-      'Mamadou Diallo',
-      'diallo',
-      'diallo@afristock.com',
-      sellerPasswordHash,
-      'Mamadou',
-      'Diallo',
-      '+225 05 44 22 11',
-      'Diallo Tech & Pièces',
-    ]);
-    sellerId = result.insertId;
-    console.log('✅ Compte Vendeur créé : identifiant = diallo | mot de passe = Diallo@AfriStock2026!');
-  } else {
-    sellerId = sellerRows[0].id;
-    console.log('ℹ️ Compte Vendeur existant (id=' + sellerId + ')');
-  }
-
-  // 3. Initialiser les catégories par défaut
-  console.log('[MySQL Init] Peuplement des catégories...');
+  // 3. Initialiser les catégories standards du métier (si absentes)
+  console.log('[MySQL Init] Peuplement des catégories standards...');
   for (const cat of DEFAULT_CATEGORIES) {
     const [existing] = await db.query('SELECT id FROM categories WHERE name = ?', [cat.name]);
     if (existing.length === 0) {
@@ -109,46 +84,9 @@ export const initializeDatabase = async () => {
     }
   }
 
-  // 4. Initialiser le catalogue de produits pour le vendeur démo
-  console.log('[MySQL Init] Vérification des produits en stock...');
-  const [productCountRows] = await db.query('SELECT COUNT(*) as count FROM products');
-  const count = productCountRows[0].count;
-
-  if (count === 0 && DEFAULT_PRODUCTS && DEFAULT_PRODUCTS.length > 0) {
-    console.log(`[MySQL Init] Insertion de ${DEFAULT_PRODUCTS.length} produits exemples pour le vendeur Mamadou Diallo...`);
-    for (const prod of DEFAULT_PRODUCTS) {
-      const [res] = await db.query(`
-        INSERT INTO products (
-          user_id, name, category, brand, model, reference, quantity,
-          price_buy, price_sale, threshold, location, description, compatible_models
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `, [
-        sellerId,
-        prod.name,
-        prod.category,
-        prod.brand,
-        prod.model,
-        prod.reference || null,
-        Number(prod.quantity || 0),
-        Number(prod.price_buy || 0),
-        Number(prod.price_sale || 0),
-        Number(prod.threshold || 3),
-        prod.location || 'Rayon A',
-        prod.description || '',
-        prod.compatible || '',
-      ]);
-
-      const newProdId = res.insertId;
-      await db.query(`
-        INSERT INTO stock_movements (user_id, product_id, type, quantity, note)
-        VALUES (?, ?, 'entry', ?, 'Stock initial de démarrage')
-      `, [sellerId, newProdId, Number(prod.quantity || 0)]);
-    }
-    console.log('✅ Catalogue initial inséré avec succès.');
-  }
-
+  console.log('✅ Système de production initialisé sans données factices ni simulation.');
   await db.end();
-  console.log('🎉 Base de données MySQL `afristock` prête et sécurisée !');
+  console.log('🎉 Base de données MySQL `afristock` prête pour la production !');
 };
 
 // If run directly from terminal

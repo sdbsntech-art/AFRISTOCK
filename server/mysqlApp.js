@@ -14,13 +14,24 @@ import {
   validatePasswordStrength,
 } from './security.js';
 
-// Configuration du pool MySQL pour Laragon
+// Configuration du pool MySQL (supporte Laragon en local et les bases Cloud en production)
+const poolConfig = process.env.MYSQL_URL
+  ? { uri: process.env.MYSQL_URL }
+  : {
+      host: process.env.MYSQL_HOST || '127.0.0.1',
+      port: Number(process.env.MYSQL_PORT) || 3306,
+      user: process.env.MYSQL_USER || 'root',
+      password: process.env.MYSQL_PASSWORD || '',
+      database: process.env.MYSQL_DATABASE || 'afristock',
+    };
+
+const isRemoteDb = (poolConfig.host && poolConfig.host !== '127.0.0.1' && poolConfig.host !== 'localhost') || process.env.MYSQL_URL;
+const sslConfig = process.env.MYSQL_SSL === 'true' || (isRemoteDb && process.env.MYSQL_SSL !== 'false')
+  ? { rejectUnauthorized: process.env.MYSQL_SSL_REJECT_UNAUTHORIZED === 'true' }
+  : undefined;
+
 const pool = mysql.createPool({
-  host: process.env.MYSQL_HOST || '127.0.0.1',
-  port: Number(process.env.MYSQL_PORT) || 3306,
-  user: process.env.MYSQL_USER || 'root',
-  password: process.env.MYSQL_PASSWORD || '',
-  database: process.env.MYSQL_DATABASE || 'afristock',
+  ...poolConfig,
   waitForConnections: true,
   connectionLimit: Number(process.env.MYSQL_POOL_SIZE) || 10,
   queueLimit: 0,
@@ -29,7 +40,8 @@ const pool = mysql.createPool({
   dateStrings: true,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000,
-  connectTimeout: 10000,
+  connectTimeout: 15000,
+  ...(sslConfig ? { ssl: sslConfig } : {}),
 });
 
 pool.on('error', (error) => console.error(`[MySQL] Erreur de connexion au pool : ${error.message}`));
@@ -443,7 +455,7 @@ app.get('/api/admin/users', requireAdmin, asyncRoute(async (_req, res) => {
       FROM sales
       GROUP BY user_id
     ) sales_summary ON sales_summary.user_id = u.id
-    GROUP BY u.id
+    GROUP BY u.id, sales_summary.total_revenue, sales_summary.total_profit, sales_summary.sales_count
     ORDER BY u.role ASC, u.created_at DESC
   `);
 
@@ -1304,13 +1316,13 @@ app.get('/api/dashboard', requireAuth, asyncRoute(async (req, res) => {
       FROM products p
       LEFT JOIN sale_items si ON si.product_id = p.id
       ${sellerId ? 'WHERE p.user_id = ?' : ''}
-      GROUP BY p.id ORDER BY sold DESC LIMIT 5
+      GROUP BY p.id, p.name, p.category ORDER BY sold DESC LIMIT 5
     `, paramUser),
     pool.query(`
       SELECT DATE_FORMAT(sale_date, '%d') AS day, SUM(total_amount) AS total_amount
       FROM sales
       ${sellerId ? 'WHERE user_id = ? AND' : 'WHERE'} sale_date >= DATE_SUB(NOW(), INTERVAL 6 DAY)
-      GROUP BY DATE(sale_date) ORDER BY DATE(sale_date) ASC
+      GROUP BY DATE(sale_date), DATE_FORMAT(sale_date, '%d') ORDER BY DATE(sale_date) ASC
     `, paramUser),
     pool.query(`
       SELECT c.family, COALESCE(SUM(p.quantity), 0) AS stock
@@ -1363,7 +1375,7 @@ app.get('/api/stats', requireAuth, asyncRoute(async (req, res) => {
       JOIN products p ON p.id = si.product_id
       JOIN sales s ON s.id = si.sale_id
       ${whereJoinSale}
-      GROUP BY p.id ORDER BY total_quantity DESC LIMIT 1
+      GROUP BY p.id, p.name ORDER BY total_quantity DESC LIMIT 1
     `, param),
     pool.query(`
       SELECT p.category AS name, SUM(si.quantity) AS total_quantity
@@ -1376,7 +1388,7 @@ app.get('/api/stats', requireAuth, asyncRoute(async (req, res) => {
     pool.query(`
       SELECT DATE_FORMAT(sale_date, '%d') AS label, SUM(total_amount) AS total_amount
       FROM sales ${whereSale}
-      GROUP BY DATE(sale_date) ORDER BY DATE(sale_date) ASC
+      GROUP BY DATE(sale_date), DATE_FORMAT(sale_date, '%d') ORDER BY DATE(sale_date) ASC
     `, param),
   ]);
 
@@ -1422,7 +1434,7 @@ const getMonthStats = async (start, endExclusive, sellerId) => {
     JOIN products p ON p.id = si.product_id
     JOIN sales s ON s.id = si.sale_id
     WHERE s.sale_date >= ? AND s.sale_date < ? ${whereUser}
-    GROUP BY p.id ORDER BY total_quantity DESC LIMIT 5
+    GROUP BY p.id, p.name, p.category ORDER BY total_quantity DESC LIMIT 5
   `, params);
 
   const [topCategories] = await pool.query(`
@@ -1438,7 +1450,7 @@ const getMonthStats = async (start, endExclusive, sellerId) => {
     SELECT DATE_FORMAT(sale_date, '%d') AS label, SUM(total_amount) AS total_amount
     FROM sales s
     WHERE s.sale_date >= ? AND s.sale_date < ? ${whereUser}
-    GROUP BY DATE(sale_date) ORDER BY DATE(sale_date) ASC
+    GROUP BY DATE(sale_date), DATE_FORMAT(sale_date, '%d') ORDER BY DATE(sale_date) ASC
   `, params);
 
   return {
