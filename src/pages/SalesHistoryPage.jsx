@@ -30,15 +30,17 @@ export default function SalesHistoryPage({ onToast, globalSearch }) {
 
   return (
     <div className="history-page">
-      <div>
-        <p className="page-kicker">Comptabilité caisse</p>
-        <h2>Historique des tickets</h2>
+      <div className="page-header">
+        <div>
+          <p className="page-kicker">Historique</p>
+          <h2>Ventes</h2>
+        </div>
       </div>
 
-      <div className="stats-grid">
+      <div className="stats-grid three">
         <div className="stat-card primary"><span>Encaissé</span><strong>{formatCurrency(totalVendu)}</strong></div>
-        <div className="stat-card blue"><span>Articles</span><strong>{totalArticles}</strong></div>
-        <div className="stat-card green"><span>Marge</span><strong>{formatCurrency(totalProfit)}</strong></div>
+        <div className="stat-card"><span>Articles</span><strong>{totalArticles}</strong></div>
+        <div className="stat-card"><span>Marge</span><strong>{formatCurrency(totalProfit)}</strong></div>
       </div>
 
       <div className="panel filters-panel">
@@ -50,43 +52,37 @@ export default function SalesHistoryPage({ onToast, globalSearch }) {
             <option value="week">Cette semaine</option>
             <option value="month">Ce mois</option>
           </select>
-          <input type="text" value={productFilter} onChange={(e) => setProductFilter(e.target.value)} placeholder="Produit vendu" />
+          <input type="search" value={productFilter} onChange={(e) => setProductFilter(e.target.value)} placeholder="Produit vendu" />
           <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} />
         </div>
       </div>
 
-      <div className="panel table-panel">
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Ticket</th>
-                <th>Lignes</th>
-                <th>Qté</th>
-                <th>Prix</th>
-                <th>Total</th>
-                <th>Marge</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sales.length === 0 ? (
-                <tr><td colSpan="6">Aucun ticket.</td></tr>
-              ) : sales.map((sale) => (
-                <tr key={sale.id}>
-                  <td>
-                    #{sale.id}
-                    <small>{new Date(sale.sale_date).toLocaleString('fr-FR')}</small>
-                  </td>
-                  <td>{sale.items?.map((item) => <div key={`${sale.id}-${item.product_id}`}>{item.product_name}</div>)}</td>
-                  <td>{sale.items?.map((item) => <div key={`${sale.id}-${item.product_id}-q`}>{item.quantity}</div>)}</td>
-                  <td>{sale.items?.map((item) => <div key={`${sale.id}-${item.product_id}-p`}>{formatCurrency(item.unit_price)}</div>)}</td>
-                  <td>{formatCurrency(sale.total_amount)}</td>
-                  <td>{formatCurrency(sale.total_profit)}</td>
-                </tr>
+      <div className="ticket-list">
+        {sales.length === 0 ? (
+          <div className="empty-note panel">Aucun ticket.</div>
+        ) : sales.map((sale) => (
+          <article key={sale.id} className="panel ticket-card">
+            <div className="ticket-head">
+              <div>
+                <strong>Ticket #{sale.id}</strong>
+                <small>{new Date(sale.sale_date).toLocaleString('fr-FR')}</small>
+              </div>
+              <strong>{formatCurrency(sale.total_amount)}</strong>
+            </div>
+            <ul className="ticket-lines">
+              {(sale.items || []).map((item) => (
+                <li key={`${sale.id}-${item.product_id}`}>
+                  <span>{item.product_name} × {item.quantity}</span>
+                  <span>{formatCurrency(item.subtotal)}</span>
+                </li>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </ul>
+            <div className="ticket-meta">
+              {sale.customer_name ? <span>Client : {sale.customer_name}</span> : null}
+              <span>Marge {formatCurrency(sale.total_profit)}</span>
+            </div>
+          </article>
+        ))}
       </div>
     </div>
   );

@@ -18,7 +18,6 @@ export default function SettingsPage({ onToast, user, onUserUpdate }) {
   const [name, setName] = useState('');
   const [family, setFamily] = useState('');
   const [editingId, setEditingId] = useState(null);
-  const [googleClientId, setGoogleClientId] = useState('');
   const [profile, setProfile] = useState({
     first_name: user?.first_name || '',
     last_name: user?.last_name || '',
@@ -28,7 +27,6 @@ export default function SettingsPage({ onToast, user, onUserUpdate }) {
     shop_name: user?.shop_name || 'AfriStock',
     logo: user?.logo || '',
   });
-
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: '',
     newPassword: '',
@@ -38,10 +36,6 @@ export default function SettingsPage({ onToast, user, onUserUpdate }) {
 
   const handleChangePassword = async (event) => {
     event.preventDefault();
-    if (passwordForm.newPassword.length < 8) {
-      onToast({ type: 'error', message: 'Le nouveau mot de passe doit contenir au moins 8 caractères.' });
-      return;
-    }
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
       onToast({ type: 'error', message: 'Les nouveaux mots de passe ne correspondent pas.' });
       return;
@@ -57,7 +51,7 @@ export default function SettingsPage({ onToast, user, onUserUpdate }) {
       });
       setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
       if (res.user) onUserUpdate?.(res.user);
-      onToast({ type: 'success', message: 'Mot de passe modifié et sécurisé avec succès.' });
+      onToast({ type: 'success', message: 'Mot de passe modifié.' });
     } catch (error) {
       onToast({ type: 'error', message: error.message });
     } finally {
@@ -66,13 +60,16 @@ export default function SettingsPage({ onToast, user, onUserUpdate }) {
   };
 
   const loadCategories = async () => {
-    const data = await apiRequest('/categories');
-    setCategories(data);
+    try {
+      const data = await apiRequest('/categories');
+      setCategories(data);
+    } catch (error) {
+      onToast({ type: 'error', message: error.message });
+    }
   };
 
   useEffect(() => {
     loadCategories();
-    apiRequest('/auth/google-config').then((data) => setGoogleClientId(data.clientId || '')).catch(() => {});
   }, []);
 
   const saveProfile = async (event) => {
@@ -83,17 +80,7 @@ export default function SettingsPage({ onToast, user, onUserUpdate }) {
         body: JSON.stringify({ ...profile, shop_name: profile.shop_name.trim() || 'AfriStock' }),
       });
       onUserUpdate?.(data.user);
-      onToast({ type: 'success', message: 'Profil boutique enregistré.' });
-    } catch (error) {
-      onToast({ type: 'error', message: error.message });
-    }
-  };
-
-  const saveGoogle = async (event) => {
-    event.preventDefault();
-    try {
-      await apiRequest('/settings/google', { method: 'PUT', body: JSON.stringify({ clientId: googleClientId }) });
-      onToast({ type: 'success', message: 'ID Google enregistré.' });
+      onToast({ type: 'success', message: 'Profil enregistré.' });
     } catch (error) {
       onToast({ type: 'error', message: error.message });
     }
@@ -130,22 +117,24 @@ export default function SettingsPage({ onToast, user, onUserUpdate }) {
 
   return (
     <div className="settings-page">
-      <div>
-        <p className="page-kicker">Compte et boutique</p>
-        <h2>Paramètres</h2>
+      <div className="page-header">
+        <div>
+          <p className="page-kicker">Boutique</p>
+          <h2>Réglages</h2>
+        </div>
       </div>
 
       <form className="panel" onSubmit={saveProfile}>
-        <h3>Identité du vendeur</h3>
+        <h3>Votre boutique</h3>
         <div className="form-grid two-columns-grid">
           <label>Prénom<input value={profile.first_name} onChange={(e) => setProfile({ ...profile, first_name: e.target.value })} /></label>
           <label>Nom<input value={profile.last_name} onChange={(e) => setProfile({ ...profile, last_name: e.target.value })} /></label>
           <label>Identifiant<input value={profile.username} onChange={(e) => setProfile({ ...profile, username: e.target.value })} /></label>
           <label>Email<input type="email" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} /></label>
           <label>Téléphone<input value={profile.phone} onChange={(e) => setProfile({ ...profile, phone: e.target.value })} /></label>
-          <label>Nom de la boutique<input value={profile.shop_name} onChange={(e) => setProfile({ ...profile, shop_name: e.target.value })} placeholder="AfriStock par défaut" /></label>
+          <label>Nom de la boutique<input value={profile.shop_name} onChange={(e) => setProfile({ ...profile, shop_name: e.target.value })} /></label>
           <label className="full-width">Logo
-            <input type="file" accept="image/*" onChange={async (e) => {
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={async (e) => {
               try {
                 const logo = await readLogo(e.target.files?.[0]);
                 if (logo) setProfile((prev) => ({ ...prev, logo }));
@@ -155,77 +144,50 @@ export default function SettingsPage({ onToast, user, onUserUpdate }) {
             }} />
           </label>
         </div>
-        {profile.logo && <img className="shop-logo" src={profile.logo} alt="Logo" />}
-        <div className="modal-actions"><button type="submit" className="primary-button">Enregistrer le profil</button></div>
-      </form>
-
-      <form className="panel" onSubmit={saveGoogle}>
-        <h3>Connexion Google</h3>
-        <p className="muted-note">Collez l’ID client OAuth (type Application Web) depuis Google Cloud Console. Origines JavaScript autorisées : http://localhost:4173 — URI de redirection : http://localhost:4173</p>
-        <input value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} placeholder="xxxx.apps.googleusercontent.com" />
-        <div className="modal-actions"><button type="submit" className="primary-button">Activer Google</button></div>
+        {profile.logo && <img className="shop-logo" src={profile.logo} alt="" />}
+        <div className="modal-actions"><button type="submit" className="primary-button">Enregistrer</button></div>
       </form>
 
       <form className="panel" onSubmit={handleChangePassword}>
-        <h3>🛡️ Sécurité & Mot de passe</h3>
-        <p className="muted-note">Vos mots de passe sont chiffrés et hachés de manière irréversible via l’algorithme cryptographique Scrypt dans MySQL.</p>
+        <h3>Mot de passe</h3>
+        <p className="muted-note">Les mots de passe sont stockés de façon sécurisée dans le fichier SQLite local.</p>
         <div className="form-grid two-columns-grid">
-          <label>
-            Mot de passe actuel
-            <input
-              type="password"
-              value={passwordForm.currentPassword}
-              onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
-              required
-              placeholder="Votre mot de passe actuel"
-            />
+          <label>Mot de passe actuel
+            <input type="password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })} required />
           </label>
-          <div></div>
-          <label>
-            Nouveau mot de passe
-            <input
-              type="password"
-              value={passwordForm.newPassword}
-              onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-              required
-              placeholder="Minimum 8 caractères"
-            />
+          <div />
+          <label>Nouveau mot de passe
+            <input type="password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} required minLength={8} />
           </label>
-          <label>
-            Confirmer le nouveau mot de passe
-            <input
-              type="password"
-              value={passwordForm.confirmPassword}
-              onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
-              required
-              placeholder="Répétez le mot de passe"
-            />
+          <label>Confirmation
+            <input type="password" value={passwordForm.confirmPassword} onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} required />
           </label>
         </div>
         <div className="modal-actions">
           <button type="submit" className="primary-button" disabled={passwordLoading}>
-            {passwordLoading ? 'Mise à jour...' : 'Mettre à jour mon mot de passe'}
+            {passwordLoading ? 'Mise à jour…' : 'Changer le mot de passe'}
           </button>
         </div>
       </form>
 
-      <div className="panel settings-layout">
-        <form onSubmit={saveCategory} className="category-form">
-          <h3>{editingId ? 'Modifier' : 'Nouvelle catégorie'}</h3>
-          <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex. Écrans Google Pixel" />
-          <input type="text" value={family} onChange={(e) => setFamily(e.target.value)} placeholder="Rayon / famille" required maxLength={191} />
-          <p className="muted-note">Créez vos catégories et rayons. Rien n’est prérempli.</p>
+      <div className="panel">
+        <h3>Catégories</h3>
+        <p className="muted-note">Exemple : catégorie « Écran OLED », rayon « Pièces iPhone ».</p>
+        <form onSubmit={saveCategory} className="category-form inline-form">
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom de la catégorie" required />
+          <input type="text" value={family} onChange={(e) => setFamily(e.target.value)} placeholder="Rayon" required maxLength={191} />
           <button type="submit" className="primary-button">{editingId ? 'Mettre à jour' : 'Ajouter'}</button>
+          {editingId ? (
+            <button type="button" className="ghost-button" onClick={() => { setEditingId(null); setName(''); setFamily(''); }}>Annuler</button>
+          ) : null}
         </form>
         <div className="tag-list">
-          {categories.map((category) => (
+          {categories.length === 0 ? <p className="muted-note">Aucune catégorie pour le moment.</p> : categories.map((category) => (
             <div key={category.id} className="tag-item">
               <span>{category.name}</span>
               <em>{category.family}</em>
-              <div className="tag-actions">
-                <button type="button" className="link-button" onClick={() => { setName(category.name); setFamily(category.family || ''); setEditingId(category.id); }}>Modifier</button>
-                <button type="button" className="link-button danger" onClick={() => deleteCategory(category.id)}>Supprimer</button>
-              </div>
+              <button type="button" className="link-button" onClick={() => { setName(category.name); setFamily(category.family || ''); setEditingId(category.id); }}>Modifier</button>
+              <button type="button" className="link-button danger" onClick={() => deleteCategory(category.id)}>Supprimer</button>
             </div>
           ))}
         </div>

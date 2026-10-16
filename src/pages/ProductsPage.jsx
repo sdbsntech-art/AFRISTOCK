@@ -18,7 +18,7 @@ const emptyForm = {
   compatible_models: '',
 };
 
-export default function ProductsPage({ onToast, globalSearch, initialFamily = '', user }) {
+export default function ProductsPage({ onToast, globalSearch, initialFamily = '', user, onOpenSettings }) {
   const isAdmin = user?.role === 'admin';
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -28,42 +28,47 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
   const [family, setFamily] = useState(initialFamily || '');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [stockFilter, setStockFilter] = useState('all');
-  const [priceMin, setPriceMin] = useState('');
-  const [priceMax, setPriceMax] = useState('');
   const [form, setForm] = useState(emptyForm);
   const [showForm, setShowForm] = useState(false);
+  const [stockModal, setStockModal] = useState(null);
+  const [stockQty, setStockQty] = useState(1);
 
   useEffect(() => {
     setFamily(initialFamily || '');
   }, [initialFamily]);
 
   const loadCategories = async () => {
-    const data = await apiRequest('/categories');
-    setCategories(data);
+    try {
+      const data = await apiRequest('/categories');
+      setCategories(data);
+    } catch (error) {
+      onToast({ type: 'error', message: error.message });
+    }
   };
 
   const loadSellers = async () => {
-    if (isAdmin) {
-      try {
-        const data = await apiRequest('/admin/users');
-        setSellers(data);
-      } catch {
-        // Ignorer si pas accès
-      }
+    if (!isAdmin) return;
+    try {
+      const data = await apiRequest('/admin/users');
+      setSellers(data);
+    } catch {
+      // ignore
     }
   };
 
   const loadProducts = async () => {
-    const params = new URLSearchParams();
-    if (search || globalSearch) params.set('search', search || globalSearch);
-    if (family) params.set('family', family);
-    if (categoryFilter) params.set('category', categoryFilter);
-    if (stockFilter !== 'all') params.set('stockStatus', stockFilter);
-    if (priceMin) params.set('minPrice', priceMin);
-    if (priceMax) params.set('maxPrice', priceMax);
-    if (isAdmin && sellerFilter) params.set('seller_id', sellerFilter);
-    const data = await apiRequest(`/products?${params.toString()}`);
-    setProducts(data);
+    try {
+      const params = new URLSearchParams();
+      if (search || globalSearch) params.set('search', search || globalSearch);
+      if (family) params.set('family', family);
+      if (categoryFilter) params.set('category', categoryFilter);
+      if (stockFilter !== 'all') params.set('stockStatus', stockFilter);
+      if (isAdmin && sellerFilter) params.set('seller_id', sellerFilter);
+      const data = await apiRequest(`/products?${params.toString()}`);
+      setProducts(data);
+    } catch (error) {
+      onToast({ type: 'error', message: error.message });
+    }
   };
 
   useEffect(() => {
@@ -73,7 +78,7 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
 
   useEffect(() => {
     loadProducts();
-  }, [search, globalSearch, family, categoryFilter, stockFilter, priceMin, priceMax, sellerFilter]);
+  }, [search, globalSearch, family, categoryFilter, stockFilter, sellerFilter]);
 
   const visibleCategories = useMemo(
     () => (family ? categories.filter((item) => item.family === family) : categories),
@@ -95,30 +100,33 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
       setShowForm(false);
       setForm(emptyForm);
       loadProducts();
-      onToast({ type: 'success', message: form.id ? 'Produit mis à jour.' : 'Produit ajouté.' });
+      onToast({ type: 'success', message: form.id ? 'Article enregistré.' : 'Article ajouté.' });
     } catch (error) {
       onToast({ type: 'error', message: error.message });
     }
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Supprimer cette référence du stock ?')) return;
+    if (!window.confirm('Supprimer cet article du stock ?')) return;
     try {
       await apiRequest(`/products/${id}`, { method: 'DELETE' });
       loadProducts();
-      onToast({ type: 'success', message: 'Produit supprimé.' });
+      onToast({ type: 'success', message: 'Article supprimé.' });
     } catch (error) {
       onToast({ type: 'error', message: error.message });
     }
   };
 
-  const handleAddStock = async (id) => {
-    const quantity = Number(window.prompt('Quantité reçue ?', '5'));
-    if (!quantity || Number.isNaN(quantity)) return;
+  const handleAddStock = async (event) => {
+    event.preventDefault();
+    const quantity = Number(stockQty);
+    if (!stockModal || !Number.isSafeInteger(quantity) || quantity <= 0) return;
     try {
-      await apiRequest(`/products/${id}/add-stock`, { method: 'POST', body: JSON.stringify({ quantity }) });
+      await apiRequest(`/products/${stockModal.id}/add-stock`, { method: 'POST', body: JSON.stringify({ quantity }) });
+      setStockModal(null);
+      setStockQty(1);
       loadProducts();
-      onToast({ type: 'success', message: 'Stock mis à jour.' });
+      onToast({ type: 'success', message: 'Réception enregistrée.' });
     } catch (error) {
       onToast({ type: 'error', message: error.message });
     }
@@ -133,18 +141,25 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
 
   return (
     <div className="products-page">
-      <div className="page-topbar">
+      <div className="page-header">
         <div>
-          <p className="page-kicker">Inventaire interne</p>
+          <p className="page-kicker">Inventaire</p>
           <h2>Stock {family ? `· ${family}` : ''}</h2>
         </div>
         <button type="button" className="primary-button" onClick={() => { setForm(emptyForm); setShowForm(true); }}>
-          Ajouter une référence
+          Ajouter
         </button>
       </div>
 
+      {!categories.length ? (
+        <div className="empty-state panel">
+          <p>Créez d’abord une catégorie (ex. Écrans, Coques) pour classer vos articles.</p>
+          <button type="button" className="primary-button" onClick={() => onOpenSettings?.()}>Ouvrir les réglages</button>
+        </div>
+      ) : null}
+
       <div className="family-rail">
-        {[{ id: '', label: 'Tout le stock' }, ...families.map((item) => ({ id: item, label: item }))].map((item) => (
+        {[{ id: '', label: 'Tout' }, ...families.map((item) => ({ id: item, label: item }))].map((item) => (
           <button
             key={item.id || 'all'}
             type="button"
@@ -159,16 +174,14 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
       <div className="panel filters-panel">
         <div className="form-grid compact-grid">
           {isAdmin && (
-            <select value={sellerFilter} onChange={(e) => setSellerFilter(e.target.value)} className="seller-select-filter">
-              <option value="">🏬 Toutes les boutiques</option>
+            <select value={sellerFilter} onChange={(e) => setSellerFilter(e.target.value)}>
+              <option value="">Toutes les boutiques</option>
               {sellers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.shop_name || s.name} (@{s.username})
-                </option>
+                <option key={s.id} value={s.id}>{s.shop_name || s.name}</option>
               ))}
             </select>
           )}
-          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nom, référence, modèle compatible..." />
+          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nom, référence, modèle…" />
           <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="">Toutes les catégories</option>
             {visibleCategories.map((category) => (
@@ -181,78 +194,46 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
             <option value="low">Stock faible</option>
             <option value="out">Rupture</option>
           </select>
-          <input type="number" value={priceMin} onChange={(e) => setPriceMin(e.target.value)} placeholder="Prix min" />
-          <input type="number" value={priceMax} onChange={(e) => setPriceMax(e.target.value)} placeholder="Prix max" />
         </div>
-        <button type="button" className="ghost-button" onClick={() => { setSearch(''); setFamily(''); setCategoryFilter(''); setStockFilter('all'); setPriceMin(''); setPriceMax(''); setSellerFilter(''); }}>
-          Réinitialiser
-        </button>
       </div>
 
-      <div className="panel table-panel">
-        {products.length === 0 ? (
-          <div className="empty-state">
-            <p>Aucune référence dans ce rayon.</p>
-            <button type="button" className="primary-button" onClick={() => setShowForm(true)}>Ajouter une référence</button>
-          </div>
-        ) : (
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  {isAdmin && <th>Boutique</th>}
-                  <th>Référence</th>
-                  <th>Catégorie</th>
-                  <th>Marque / modèle</th>
-                  <th>Compatible</th>
-                  <th>Qté</th>
-                  <th>Achat</th>
-                  <th>Vente</th>
-                  <th>Marge</th>
-                  <th>Statut</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {products.map((product) => (
-                  <tr key={product.id}>
-                    {isAdmin && (
-                      <td>
-                        <span className="shop-badge small">
-                          🏪 {product.seller_shop || product.seller_name || 'AfriStock'}
-                        </span>
-                      </td>
-                    )}
-                    <td>
-                      <strong>{product.name}</strong>
-                      <small>{product.reference || '—'}</small>
-                    </td>
-                    <td>{product.category}</td>
-                    <td>{product.brand} · {product.model}</td>
-                    <td>{product.compatible_models || product.model}</td>
-                    <td>{product.quantity}</td>
-                    <td>{formatCurrency(product.price_buy)}</td>
-                    <td>{formatCurrency(product.price_sale)}</td>
-                    <td>{formatCurrency(product.profit_unit)}</td>
-                    <td><span className={statusClass(product)}>{product.status}</span></td>
-                    <td className="actions-cell">
-                      <button type="button" className="link-button" onClick={() => { setForm({ ...emptyForm, ...product }); setShowForm(true); }}>Modifier</button>
-                      <button type="button" className="link-button" onClick={() => handleAddStock(product.id)}>Réception</button>
-                      <button type="button" className="link-button danger" onClick={() => handleDelete(product.id)}>Supprimer</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      {products.length === 0 ? (
+        <div className="empty-state panel">
+          <p>Aucun article pour ces filtres.</p>
+          <button type="button" className="primary-button" onClick={() => setShowForm(true)}>Ajouter un article</button>
+        </div>
+      ) : (
+        <div className="product-grid">
+          {products.map((product) => (
+            <article key={product.id} className="stock-card">
+              <div className="stock-card-top">
+                <div>
+                  <strong>{product.name}</strong>
+                  <small>{product.category}{isAdmin ? ` · ${product.seller_shop || product.seller_name || ''}` : ''}</small>
+                </div>
+                <span className={statusClass(product)}>{product.status}</span>
+              </div>
+              <p className="muted-note">{product.brand} {product.model}{product.reference ? ` · ${product.reference}` : ''}</p>
+              <div className="stock-card-metrics">
+                <div><span>Qté</span><strong>{product.quantity}</strong></div>
+                <div><span>Vente</span><strong>{formatCurrency(product.price_sale)}</strong></div>
+                <div><span>Marge</span><strong>{formatCurrency(product.profit_unit)}</strong></div>
+              </div>
+              <div className="actions-cell">
+                <button type="button" className="ghost-button" onClick={() => { setForm({ ...emptyForm, ...product }); setShowForm(true); }}>Modifier</button>
+                <button type="button" className="ghost-button" onClick={() => { setStockModal(product); setStockQty(1); }}>Réception</button>
+                <button type="button" className="link-button danger" onClick={() => handleDelete(product.id)}>Supprimer</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
 
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>{form.id ? 'Modifier la référence' : 'Nouvelle référence'}</h3>
+              <h3>{form.id ? 'Modifier l’article' : 'Nouvel article'}</h3>
               <button type="button" className="close-button" onClick={() => setShowForm(false)}>×</button>
             </div>
             <form onSubmit={handleSaveProduct} className="modal-form">
@@ -268,14 +249,14 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
                 </label>
                 <label>Marque<input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} required /></label>
                 <label>Modèle<input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} required /></label>
-                <label>Référence interne<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
-                <label>Compatible avec<input value={form.compatible_models} onChange={(e) => setForm({ ...form, compatible_models: e.target.value })} placeholder="iPhone 13, Galaxy A14..." /></label>
-                <label>Quantité<input type="number" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })} /></label>
-                <label>Prix d'achat<input type="number" value={form.price_buy} onChange={(e) => setForm({ ...form, price_buy: Number(e.target.value) })} /></label>
-                <label>Prix de vente<input type="number" value={form.price_sale} onChange={(e) => setForm({ ...form, price_sale: Number(e.target.value) })} /></label>
-                <label>Seuil d'alerte<input type="number" value={form.threshold} onChange={(e) => setForm({ ...form, threshold: Number(e.target.value) })} /></label>
+                <label>Référence<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
+                <label>Compatible<input value={form.compatible_models} onChange={(e) => setForm({ ...form, compatible_models: e.target.value })} /></label>
+                <label>Quantité<input type="number" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })} /></label>
+                <label>Prix d’achat<input type="number" min="0" value={form.price_buy} onChange={(e) => setForm({ ...form, price_buy: Number(e.target.value) })} /></label>
+                <label>Prix de vente<input type="number" min="0" value={form.price_sale} onChange={(e) => setForm({ ...form, price_sale: Number(e.target.value) })} /></label>
+                <label>Seuil d’alerte<input type="number" min="0" value={form.threshold} onChange={(e) => setForm({ ...form, threshold: Number(e.target.value) })} /></label>
                 <label>Emplacement<input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></label>
-                <label className="full-width">Note interne<textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+                <label className="full-width">Note<textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
               </div>
               <div className="profit-box">
                 <span>Marge unitaire</span>
@@ -283,7 +264,27 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
               </div>
               <div className="modal-actions">
                 <button type="button" className="ghost-button" onClick={() => setShowForm(false)}>Annuler</button>
-                <button type="submit" className="primary-button">{form.id ? 'Enregistrer' : 'Ajouter au stock'}</button>
+                <button type="submit" className="primary-button">{form.id ? 'Enregistrer' : 'Ajouter'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {stockModal && (
+        <div className="modal-backdrop" onClick={() => setStockModal(null)}>
+          <div className="modal-card compact-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Réception — {stockModal.name}</h3>
+              <button type="button" className="close-button" onClick={() => setStockModal(null)}>×</button>
+            </div>
+            <form onSubmit={handleAddStock} className="modal-form">
+              <label>Quantité reçue
+                <input type="number" min="1" value={stockQty} onChange={(e) => setStockQty(e.target.value)} required />
+              </label>
+              <div className="modal-actions">
+                <button type="button" className="ghost-button" onClick={() => setStockModal(null)}>Annuler</button>
+                <button type="submit" className="primary-button">Ajouter au stock</button>
               </div>
             </form>
           </div>

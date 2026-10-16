@@ -39,8 +39,8 @@ export default function MustChangePasswordModal({ user, onPasswordChanged, onToa
       <div className="modal-card">
         <div className="modal-header">
           <div>
-            <span className="badge-warning">Action Requise</span>
-            <h3>🔒 Définissez votre mot de passe personnel</h3>
+            <span className="badge-warning">Action requise</span>
+            <h3>Choisissez votre mot de passe</h3>
           </div>
         </div>
 
@@ -79,7 +79,7 @@ export default function MustChangePasswordModal({ user, onPasswordChanged, onToa
             </div>
 
             <div className="security-notice small">
-              🛡️ Vos mots de passe sont hachés avec la fonction cryptographique Scrypt dans MySQL.
+              Vos mots de passe sont hachés avec Scrypt dans la base locale.
             </div>
           </div>
 

@@ -126,7 +126,7 @@ export default function ReportPage({ onToast }) {
     <div className="report-page">
       <div className="page-topbar">
         <div>
-          <p className="page-kicker">Pilotage boutique</p>
+          <p className="page-kicker">Synthèse</p>
           <h2>Rapport mensuel</h2>
         </div>
         <div className="segment-control">

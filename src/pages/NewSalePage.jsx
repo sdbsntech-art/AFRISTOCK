@@ -8,13 +8,20 @@ export default function NewSalePage({ onToast, globalSearch }) {
   const [search, setSearch] = useState('');
   const [family, setFamily] = useState('');
   const [cart, setCart] = useState([]);
+  const [customerName, setCustomerName] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [pending, setPending] = useState(false);
 
   const loadProducts = async () => {
-    const params = new URLSearchParams();
-    if (search || globalSearch) params.set('search', search || globalSearch);
-    if (family) params.set('family', family);
-    const data = await apiRequest(`/products?${params.toString()}`);
-    setProducts(data.filter((item) => item.quantity > 0));
+    try {
+      const params = new URLSearchParams();
+      if (search || globalSearch) params.set('search', search || globalSearch);
+      if (family) params.set('family', family);
+      const data = await apiRequest(`/products?${params.toString()}`);
+      setProducts(data.filter((item) => item.quantity > 0));
+    } catch (error) {
+      onToast({ type: 'error', message: error.message });
+    }
   };
 
   useEffect(() => {
@@ -53,31 +60,41 @@ export default function NewSalePage({ onToast, globalSearch }) {
 
   const validateSale = async () => {
     if (!cart.length) {
-      onToast({ type: 'error', message: 'Ajoutez au moins une pièce au ticket.' });
+      onToast({ type: 'error', message: 'Ajoutez au moins un article.' });
       return;
     }
+    setPending(true);
     try {
       await apiRequest('/sales', {
         method: 'POST',
-        body: JSON.stringify({ items: cart.map((item) => ({ id: item.id, quantity: item.quantity })) }),
+        body: JSON.stringify({
+          customer_name: customerName,
+          payment_method: paymentMethod,
+          items: cart.map((item) => ({ id: item.id, quantity: item.quantity })),
+        }),
       });
       setCart([]);
+      setCustomerName('');
       loadProducts();
-      onToast({ type: 'success', message: 'Ticket enregistré. Stock déduit.' });
+      onToast({ type: 'success', message: 'Vente enregistrée. Stock mis à jour.' });
     } catch (error) {
       onToast({ type: 'error', message: error.message });
+    } finally {
+      setPending(false);
     }
   };
 
   return (
     <div className="sale-page">
-      <div>
-        <p className="page-kicker">Point de vente</p>
-        <h2>Caisse vendeur</h2>
+      <div className="page-header">
+        <div>
+          <p className="page-kicker">Point de vente</p>
+          <h2>Caisse</h2>
+        </div>
       </div>
 
       <div className="family-rail">
-        {[{ id: '', label: 'Tous les produits' }, ...families.map((item) => ({ id: item.id, label: item.label }))].map((item) => (
+        {[{ id: '', label: 'Tous' }, ...families.map((item) => ({ id: item.id, label: item.label }))].map((item) => (
           <button key={item.id || 'all'} type="button" className={family === item.id ? 'family-chip active' : 'family-chip'} onClick={() => setFamily(item.id)}>
             {item.label}
           </button>
@@ -86,21 +103,23 @@ export default function NewSalePage({ onToast, globalSearch }) {
 
       <div className="panel sales-layout">
         <div className="search-panel">
-          <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Scanner mental : iPhone 13, USB-C, écran A54..." />
+          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un article en stock…" />
           <div className="product-list">
-            {products.map((product) => (
+            {products.length === 0 ? (
+              <div className="empty-note">Aucun article disponible.</div>
+            ) : products.map((product) => (
               <button key={product.id} type="button" className="product-card" onClick={() => addToCart(product)}>
                 <strong>{product.name}</strong>
                 <span>{product.category} · stock {product.quantity}</span>
-                <small>{formatCurrency(product.price_sale)} · {product.compatible_models || product.model}</small>
+                <small>{formatCurrency(product.price_sale)}</small>
               </button>
             ))}
           </div>
         </div>
 
         <div className="summary-panel">
-          <h3>Ticket en cours</h3>
-          {cart.length === 0 ? <p>Aucune ligne.</p> : (
+          <h3>Ticket</h3>
+          {cart.length === 0 ? <p className="muted-note">Touchez un article pour l’ajouter.</p> : (
             <div className="cart-list">
               {cart.map((item) => (
                 <div key={item.id} className="cart-item">
@@ -110,17 +129,29 @@ export default function NewSalePage({ onToast, globalSearch }) {
                   </div>
                   <div className="quantity-box">
                     <input type="number" min="1" max={item.stock || item.quantity} value={item.quantity} onChange={(e) => updateQuantity(item.id, e.target.value)} />
-                    <button type="button" className="danger-text" onClick={() => setCart((prev) => prev.filter((row) => row.id !== item.id))}>Retirer</button>
+                    <button type="button" className="link-button danger" onClick={() => setCart((prev) => prev.filter((row) => row.id !== item.id))}>Retirer</button>
                   </div>
                 </div>
               ))}
             </div>
           )}
+          <label>Client (facultatif)
+            <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Nom du client" />
+          </label>
+          <label>Paiement
+            <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+              <option value="cash">Espèces</option>
+              <option value="mobile">Mobile money</option>
+              <option value="card">Carte</option>
+            </select>
+          </label>
           <div className="totals-box">
-            <div><span>Total client</span><strong>{formatCurrency(total)}</strong></div>
+            <div><span>Total</span><strong>{formatCurrency(total)}</strong></div>
             <div><span>Marge</span><strong>{formatCurrency(totalProfit)}</strong></div>
           </div>
-          <button type="button" className="primary-button" onClick={validateSale}>Valider le ticket</button>
+          <button type="button" className="primary-button" onClick={validateSale} disabled={pending || !cart.length}>
+            {pending ? 'Enregistrement…' : 'Valider la vente'}
+          </button>
         </div>
       </div>
     </div>

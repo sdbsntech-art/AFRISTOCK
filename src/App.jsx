@@ -6,11 +6,9 @@ import MustChangePasswordModal from './components/MustChangePasswordModal';
 import InstallAppButton from './components/InstallAppButton';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
-import CatalogPage from './pages/CatalogPage';
 import ProductsPage from './pages/ProductsPage';
 import NewSalePage from './pages/NewSalePage';
 import SalesHistoryPage from './pages/SalesHistoryPage';
-import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
 import ReportPage from './pages/ReportPage';
 import AdminUsersPage from './pages/AdminUsersPage';
@@ -39,7 +37,7 @@ function App() {
 
   useEffect(() => {
     if (!toast) return undefined;
-    const timer = setTimeout(() => setToast(null), 2500);
+    const timer = setTimeout(() => setToast(null), 2800);
     return () => clearTimeout(timer);
   }, [toast]);
 
@@ -49,11 +47,8 @@ function App() {
       body: JSON.stringify({ identifier, password }),
     });
     setUser(data.user);
-    setPage(data.user?.role === 'admin' ? 'admin-users' : 'dashboard');
-    setToast({
-      type: 'success',
-      message: data.user?.role === 'admin' ? 'Session Administrateur ouverte.' : 'Connexion réussie.',
-    });
+    setPage('dashboard');
+    setToast({ type: 'success', message: 'Connexion réussie.' });
   };
 
   const handleSignup = async (payload) => {
@@ -62,8 +57,8 @@ function App() {
       body: JSON.stringify(payload),
     });
     setUser(data.user);
-    setPage(data.user?.role === 'admin' ? 'admin-users' : 'dashboard');
-    setToast({ type: 'success', message: data.user?.role === 'admin' ? 'Compte propriétaire créé.' : 'Compte vendeur créé.' });
+    setPage('dashboard');
+    setToast({ type: 'success', message: 'Compte créé. Vous pouvez commencer.' });
   };
 
   const handleGoogle = async (credential) => {
@@ -80,6 +75,7 @@ function App() {
     await apiRequest('/logout', { method: 'POST' });
     setUser(null);
     setPage('dashboard');
+    setGlobalSearch('');
   };
 
   const openStock = (family = '') => {
@@ -91,27 +87,23 @@ function App() {
     switch (page) {
       case 'admin-users':
         return <AdminUsersPage onToast={setToast} onOpenSellerProducts={openStock} />;
-      case 'catalog':
-        return <CatalogPage onOpenFamily={openStock} onManageCategories={() => setPage('settings')} />;
       case 'products':
-        return <ProductsPage onToast={setToast} globalSearch={globalSearch} initialFamily={catalogFamily} user={user} />;
+        return <ProductsPage onToast={setToast} globalSearch={globalSearch} initialFamily={catalogFamily} user={user} onOpenSettings={() => setPage('settings')} />;
       case 'sale':
         return <NewSalePage onToast={setToast} globalSearch={globalSearch} />;
       case 'history':
         return <SalesHistoryPage onToast={setToast} globalSearch={globalSearch} />;
       case 'report':
         return <ReportPage onToast={setToast} />;
-      case 'stats':
-        return <StatsPage />;
       case 'settings':
         return <SettingsPage onToast={setToast} user={user} onUserUpdate={setUser} />;
       default:
-        return <DashboardPage onToast={setToast} onOpenStock={openStock} />;
+        return <DashboardPage onToast={setToast} onOpenStock={openStock} onNavigate={setPage} />;
     }
   };
 
   if (loading) {
-    return <div className="loading-screen">Connexion au système AfriStock...</div>;
+    return <div className="loading-screen">Ouverture d’AfriStock…</div>;
   }
 
   if (!user) {
@@ -133,26 +125,24 @@ function App() {
       <main className="main-panel">
         <header className="topbar">
           <div className="search-box">
-            <span>🔎</span>
+            <span aria-hidden="true">⌕</span>
             <input
-              type="text"
+              type="search"
               value={globalSearch}
               onChange={(event) => setGlobalSearch(event.target.value)}
-              placeholder="Référence, modèle, iPhone 13, connecteur USB-C..."
+              placeholder="Rechercher un article…"
             />
           </div>
           <div className="topbar-user">
             {user.logo ? (
-              <img className="avatar-image" src={user.logo} alt={shopLabel} />
+              <img className="avatar-image" src={user.logo} alt="" />
             ) : (
               <div className={`avatar ${isAdmin ? 'admin-avatar' : ''}`}>
-                {isAdmin ? '👑' : sellerLabel.charAt(0).toUpperCase()}
+                {sellerLabel.charAt(0).toUpperCase()}
               </div>
             )}
             <div>
-              <strong>
-                {sellerLabel} {isAdmin && <span className="topbar-role-tag">ADMIN</span>}
-              </strong>
+              <strong>{sellerLabel}</strong>
               <small>{shopLabel}</small>
             </div>
           </div>
@@ -160,18 +150,10 @@ function App() {
         </header>
 
         <div className="page-content">{renderPage()}</div>
-
-        <footer className="app-footer">
-          <span>{sellerLabel} ({isAdmin ? 'Console Admin' : 'Vendeur'})</span>
-          <span>{shopLabel}</span>
-          {user.phone ? <span>{user.phone}</span> : null}
-          <span className="mysql-badge">Base MySQL Laragon (afristock)</span>
-        </footer>
       </main>
 
       <Notification toast={toast} />
 
-      {/* Forcer le changement de mot de passe si réinitialisé par admin */}
       {user.must_change_password && (
         <MustChangePasswordModal
           user={user}

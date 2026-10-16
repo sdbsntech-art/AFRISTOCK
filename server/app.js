@@ -2,8 +2,6 @@ import './loadEnv.js';
 import express from 'express';
 import session from 'express-session';
 import crypto from 'node:crypto';
-import mysql from 'mysql2/promise';
-import connectMySQLStore from 'express-mysql-session';
 import { DEFAULT_SHOP_NAME, fullName, publicUser } from './userProfile.js';
 import { buildMonthlyAnalysis } from './reportEngine.js';
 import {
@@ -13,22 +11,13 @@ import {
   generateSecurePassword,
   validatePasswordStrength,
 } from './security.js';
-import { getMySqlConfig, getSessionSecret } from './databaseConfig.js';
-
-// Le pool est volontairement limité au serveur MySQL local.
-const pool = mysql.createPool(getMySqlConfig());
-
-pool.on('error', (error) => console.error(`[MySQL] Erreur de connexion au pool : ${error.message}`));
+import { getSessionSecret } from './databaseConfig.js';
+import { closeDatabase, openSqlite, pool, SqliteSessionStore, withTransaction } from './sqlite.js';
 
 const sessionSecret = getSessionSecret();
 
 const app = express();
-const MySQLStore = connectMySQLStore(session);
-const sessionStore = new MySQLStore({
-  schema: { tableName: 'user_sessions' },
-  clearExpired: true,
-  checkExpirationInterval: 15 * 60 * 1000,
-}, pool);
+const sessionStore = new SqliteSessionStore(openSqlite());
 
 app.disable('x-powered-by');
 
@@ -249,21 +238,6 @@ const logActivity = async (connOrPool, { userId, userName, action, entityType, e
   }
 };
 
-const withTransaction = async (callback) => {
-  const connection = await pool.getConnection();
-  try {
-    await connection.beginTransaction();
-    const result = await callback(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-};
-
 const validId = (value) => Number.isSafeInteger(Number(value)) && Number(value) > 0;
 const validNonNegativeInt = (value) => Number.isSafeInteger(Number(value)) && Number(value) >= 0;
 const validText = (value, max = 200) => typeof value === 'string' && value.length <= max;
@@ -276,7 +250,7 @@ const validLogo = (value) => {
     || /^https:\/\/lh3\.googleusercontent\.com\/[^\s"'<>\\]{1,2048}$/.test(value);
 };
 
-// Helper pour formater les nombres dans les lignes MySQL
+// Convert SQLite numeric values for API responses.
 const numericRows = (rows, fields) => rows.map((row) => Object.fromEntries(
   Object.entries(row).map(([key, value]) => [key, fields.includes(key) && value !== null ? Number(value) : value]),
 ));
@@ -320,8 +294,8 @@ app.post('/api/login', limitAuthAttempts(loginAttemptKey), asyncRoute(async (req
   }
 
   const [rows] = await pool.query(
-    'SELECT * FROM users WHERE LOWER(email) = ? OR username = ?',
-    [identifier.toLowerCase(), identifier],
+    'SELECT * FROM users WHERE LOWER(email) = ? OR LOWER(username) = ?',
+    [identifier.toLowerCase(), identifier.toLowerCase()],
   );
   const user = rows[0];
 
@@ -402,43 +376,41 @@ app.post('/api/signup', limitAuthAttempts(), asyncRoute(async (req, res, next) =
     return res.status(400).json({ error: 'Format de logo non autorisé.' });
   }
 
-  const connection = await pool.getConnection();
-  let setupLock = false;
+  const passwordHash = await hashPassword(password);
   let userId;
   try {
-    const [[lock]] = await connection.query("SELECT GET_LOCK('afristock-initial-owner', 10) AS acquired");
-    if (Number(lock.acquired) !== 1) {
-      return res.status(503).json({ error: 'Initialisation occupée. Réessayez dans quelques secondes.' });
-    }
-    setupLock = true;
-    const [[result]] = await connection.query('SELECT COUNT(*) AS user_count FROM users');
-    if (Number(result.user_count) !== 0) {
-      return res.status(403).json({ error: 'La création publique est fermée. Demandez un compte à l’administrateur.' });
-    }
+    userId = await withTransaction(async (connection) => {
+      const [[result]] = await connection.query('SELECT COUNT(*) AS user_count FROM users');
+      if (Number(result.user_count) !== 0) {
+        const error = new Error('La création publique est fermée. Demandez un compte à l’administrateur.');
+        error.status = 403;
+        throw error;
+      }
 
-    const [created] = await connection.query(`
-      INSERT INTO users (name, username, email, password, role, status, first_name, last_name, phone, shop_name, logo, must_change_password)
-      VALUES (?, ?, ?, ?, 'admin', 'active', ?, ?, ?, ?, ?, 0)
-    `, [
-      safeName,
-      username,
-      email,
-      await hashPassword(password),
-      firstName,
-      lastName,
-      phone,
-      shopName,
-      logo,
-    ]);
-    userId = created.insertId;
+      const [created] = await connection.query(`
+        INSERT INTO users (name, username, email, password, role, status, first_name, last_name, phone, shop_name, logo, must_change_password)
+        VALUES (?, ?, ?, ?, 'admin', 'active', ?, ?, ?, ?, ?, 0)
+      `, [
+        safeName,
+        username,
+        email,
+        passwordHash,
+        firstName,
+        lastName,
+        phone,
+        shopName,
+        logo,
+      ]);
+      return created.insertId;
+    });
   } catch (error) {
+    if (error.status && error.status < 500) {
+      return res.status(error.status).json({ error: error.message });
+    }
     if (error.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ error: 'Un compte avec cet email ou cet identifiant existe déjà.' });
     }
     throw error;
-  } finally {
-    if (setupLock) await connection.query("SELECT RELEASE_LOCK('afristock-initial-owner')");
-    connection.release();
   }
 
   const newUser = await loadUser(userId);
@@ -1016,7 +988,7 @@ app.get('/api/products', requireAuth, asyncRoute(async (req, res) => {
   }
 
   if (search) {
-    const term = `%${String(search).trim().toLowerCase()}%`;
+    const term = `%${String(search).trim().toLowerCase().replace(/[%_]/g, '')}%`;
     conditions.push(`(
       LOWER(p.name) LIKE ? OR 
       LOWER(p.category) LIKE ? OR 
@@ -1044,11 +1016,11 @@ app.get('/api/products', requireAuth, asyncRoute(async (req, res) => {
   if (stockStatus === 'low') conditions.push('p.quantity > 0 AND p.quantity <= p.threshold');
   if (stockStatus === 'out') conditions.push('p.quantity <= 0');
   if (stockStatus === 'available') conditions.push('p.quantity > p.threshold');
-  if (minPrice) {
+  if (minPrice && Number.isFinite(Number(minPrice))) {
     conditions.push('p.price_sale >= ?');
     params.push(Number(minPrice));
   }
-  if (maxPrice) {
+  if (maxPrice && Number.isFinite(Number(maxPrice))) {
     conditions.push('p.price_sale <= ?');
     params.push(Number(maxPrice));
   }
@@ -1323,13 +1295,17 @@ app.post('/api/sales', requireAuth, asyncRoute(async (req, res) => {
     .trim()
     .replace(/[\u0000-\u001F\u007F]/g, '')
     .slice(0, 64) || 'cash';
+  const customerName = String(req.body?.customer_name || '')
+    .trim()
+    .replace(/[\u0000-\u001F\u007F]/g, '')
+    .slice(0, 191);
 
   try {
     const saleResult = await withTransaction(async (conn) => {
       // 1. Créer le ticket de vente lié au vendeur connecté
       const [saleInsert] = await conn.query(
-        'INSERT INTO sales (user_id, total_amount, total_profit, items_count, payment_method) VALUES (?, 0, 0, 0, ?)',
-        [sessionUser.id, paymentMethod],
+        'INSERT INTO sales (user_id, total_amount, total_profit, items_count, customer_name, payment_method) VALUES (?, 0, 0, 0, ?, ?)',
+        [sessionUser.id, customerName || null, paymentMethod],
       );
       const saleId = saleInsert.insertId;
 
@@ -1419,11 +1395,11 @@ app.get('/api/sales', requireAuth, asyncRoute(async (req, res) => {
 
   if (product) {
     filters.push('LOWER(p.name) LIKE ?');
-    params.push(`%${String(product).trim().toLowerCase()}%`);
+    params.push(`%${String(product).trim().toLowerCase().replace(/[%_]/g, '')}%`);
   }
   if (category) {
     filters.push('LOWER(p.category) LIKE ?');
-    params.push(`%${String(category).trim().toLowerCase()}%`);
+    params.push(`%${String(category).trim().toLowerCase().replace(/[%_]/g, '')}%`);
   }
   if (date) {
     filters.push('DATE(s.sale_date) = ?');
@@ -1463,6 +1439,7 @@ app.get('/api/sales', requireAuth, asyncRoute(async (req, res) => {
         total_profit: Number(row.total_profit),
         items_count: Number(row.items_count),
         payment_method: row.payment_method,
+        customer_name: row.customer_name || '',
         items: [],
       };
       map.set(row.id, saleObj);
@@ -1740,7 +1717,9 @@ app.use('/api', (_req, res) => {
 app.use((error, _req, res, _next) => {
   console.error(`[API Error] ${error.message}`);
   if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Cet élément existe déjà dans la base de données.' });
-  if (error.code === 'ER_ROW_IS_REFERENCED_2') return res.status(409).json({ error: 'Cette donnée est utilisée par d’autres éléments.' });
+  if (error.code === 'ER_ROW_IS_REFERENCED_2' || /FOREIGN KEY constraint failed/i.test(error.message || '')) {
+    return res.status(409).json({ error: 'Cette donnée est utilisée par d’autres éléments.' });
+  }
   // Erreurs de lecture du corps de requête (JSON invalide, corps trop volumineux)
   if (error.status && error.status < 500) {
     const message = error.type === 'entity.too.large'
@@ -1757,6 +1736,9 @@ app.use((error, _req, res, _next) => {
   });
 });
 
-export const closeSessionStore = () => sessionStore.close();
+export const closeSessionStore = async () => {
+  await sessionStore.close();
+  closeDatabase();
+};
 
 export { app, pool };

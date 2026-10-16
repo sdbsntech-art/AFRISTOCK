@@ -1,35 +1,30 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import test from 'node:test';
-import { getLocalServerHost, getMySqlAdminConfig, getMySqlConfig, getSessionSecret } from '../server/databaseConfig.js';
+import { getLocalServerHost, getSessionSecret, getSqlitePath } from '../server/databaseConfig.js';
 
-test('uses local MySQL defaults without remote TLS configuration', () => {
-  const config = getMySqlConfig({});
-
-  assert.equal(config.host, '127.0.0.1');
-  assert.equal(config.database, 'afristock');
-  assert.equal(config.user, 'afristock_app');
-  assert.equal(config.connectionLimit, 10);
-  assert.equal('ssl' in config, false);
+test('uses a local SQLite file by default', () => {
+  const sqlitePath = getSqlitePath({ LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local' });
+  assert.equal(sqlitePath, path.join('C:\\Users\\test\\AppData\\Local', 'AfriStock', 'afristock.sqlite'));
 });
 
-test('uses a separate local MySQL administrator account for initialization', () => {
-  const config = getMySqlAdminConfig({});
-
-  assert.equal(config.host, '127.0.0.1');
-  assert.equal(config.user, 'root');
-  assert.equal(config.database, undefined);
-});
-
-test('rejects remote MySQL hosts and hosted database URLs', () => {
-  assert.throws(() => getMySqlConfig({ MYSQL_HOST: 'db.example.com' }), /Connexion MySQL distante refusée/);
+test('rejects remote database URLs', () => {
   assert.throws(
-    () => getMySqlConfig({ MYSQL_URL: 'mysql://user:password@db.example.com/afristock' }),
-    /MYSQL_URL distante est désactivée/,
+    () => getSqlitePath({ DATABASE_URL: 'postgres://db.example.com/afristock' }),
+    /URL de bases distantes/,
+  );
+  assert.throws(
+    () => getSqlitePath({ SQLITE_PATH: 'libsql://db.example.com' }),
+    /chemin de fichier absolu local/,
+  );
+  assert.throws(
+    () => getSqlitePath({ SQLITE_PATH: '\\\\server\\share\\afristock.sqlite' }),
+    /chemin de fichier absolu local/,
   );
 });
 
-test('refuses to run the MySQL API on Vercel', () => {
-  assert.throws(() => getMySqlConfig({ VERCEL: '1' }), /ne peut pas fonctionner sur Vercel/);
+test('refuses to run the API on Vercel', () => {
+  assert.throws(() => getSqlitePath({ VERCEL: '1' }), /ne peut pas fonctionner sur Vercel/);
 });
 
 test('binds the local API only to loopback interfaces', () => {

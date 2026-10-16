@@ -1,8 +1,16 @@
+import os from 'node:os';
+import path from 'node:path';
+
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
-const positiveInteger = (value, fallback) => {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+const assertLocalDatabaseEnvironment = (env) => {
+  if (env.VERCEL === '1' || env.VERCEL_ENV) {
+    throw new Error('AfriStock utilise SQLite local uniquement et ne peut pas fonctionner sur Vercel.');
+  }
+
+  if (env.MYSQL_URL?.trim() || env.DATABASE_URL?.trim()) {
+    throw new Error('Les URL de bases distantes sont désactivées. AfriStock stocke les données dans un fichier SQLite local.');
+  }
 };
 
 export const getLocalServerHost = (env = process.env) => {
@@ -13,51 +21,29 @@ export const getLocalServerHost = (env = process.env) => {
   return host;
 };
 
-export const getMySqlConfig = (env = process.env) => {
+export const getDataDirectory = (env = process.env) => {
   assertLocalDatabaseEnvironment(env);
-  const host = env.MYSQL_HOST || '127.0.0.1';
-
-  return {
-    host,
-    port: positiveInteger(env.MYSQL_PORT, 3306),
-    user: env.MYSQL_USER || 'afristock_app',
-    password: env.MYSQL_PASSWORD || '',
-    database: env.MYSQL_DATABASE || 'afristock',
-    waitForConnections: true,
-    connectionLimit: positiveInteger(env.MYSQL_POOL_SIZE, 10),
-    queueLimit: 0,
-    charset: 'utf8mb4',
-    timezone: 'Z',
-    dateStrings: true,
-    enableKeepAlive: true,
-    keepAliveInitialDelay: 10000,
-    connectTimeout: 15000,
-  };
+  if (env.AFRISTOCK_DATA_DIR) {
+    if (/^(\\\\|\/\/)/.test(env.AFRISTOCK_DATA_DIR)) {
+      throw new Error('AFRISTOCK_DATA_DIR réseau refusé : choisissez un dossier local.');
+    }
+    return env.AFRISTOCK_DATA_DIR;
+  }
+  const localAppData = env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
+  return path.join(localAppData, 'AfriStock');
 };
 
-export const getMySqlAdminConfig = (env = process.env) => {
+export const getSqlitePath = (env = process.env) => {
   assertLocalDatabaseEnvironment(env);
-  return {
-    host: env.MYSQL_HOST || '127.0.0.1',
-    port: positiveInteger(env.MYSQL_PORT, 3306),
-    user: env.MYSQL_ADMIN_USER || 'root',
-    password: env.MYSQL_ADMIN_PASSWORD || '',
-  };
-};
-
-const assertLocalDatabaseEnvironment = (env) => {
-  if (env.VERCEL === '1' || env.VERCEL_ENV) {
-    throw new Error('AfriStock utilise MySQL local uniquement et ne peut pas fonctionner sur Vercel.');
+  const configured = env.SQLITE_PATH?.trim();
+  if (!configured) return path.join(getDataDirectory(env), 'afristock.sqlite');
+  if (configured === ':memory:') return configured;
+  if (/^(\\\\|\/\/|file:)/i.test(configured)
+    || (/^[a-z][a-z0-9+.-]*:/i.test(configured) && !/^[a-zA-Z]:[\\/]/.test(configured))
+    || !path.isAbsolute(configured)) {
+    throw new Error('SQLITE_PATH doit être un chemin de fichier absolu local, pas une URL ou un partage réseau.');
   }
-
-  if (env.MYSQL_URL?.trim()) {
-    throw new Error('MYSQL_URL distante est désactivée. Configurez MYSQL_HOST sur 127.0.0.1.');
-  }
-
-  const host = env.MYSQL_HOST || '127.0.0.1';
-  if (!loopbackHosts.has(host.toLowerCase())) {
-    throw new Error('Connexion MySQL distante refusée : MYSQL_HOST doit être localhost, 127.0.0.1 ou ::1.');
-  }
+  return configured;
 };
 
 export const getSessionSecret = (env = process.env) => {

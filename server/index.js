@@ -1,4 +1,4 @@
-import { app, closeSessionStore, pool } from './mysqlApp.js';
+import { app, closeSessionStore, pool } from './app.js';
 import { getLocalServerHost } from './databaseConfig.js';
 
 const port = Number(process.env.PORT) || 3001;
@@ -9,7 +9,7 @@ let server;
 const start = async () => {
   await pool.query('SELECT 1');
   server = app.listen(port, host, () => {
-    console.log(`Serveur AfriStock connecté à MySQL (Laragon) sur http://${host}:${port}`);
+    console.log(`Serveur AfriStock (SQLite local) sur http://${host}:${port}`);
   });
 };
 
@@ -37,6 +37,6 @@ start().catch((error) => {
   console.error(`Impossible de démarrer AfriStock : ${error.message}`);
   process.exitCode = 1;
   shutdown().catch((shutdownError) => {
-    console.error(`Impossible de fermer les connexions MySQL : ${shutdownError.message}`);
+    console.error(`Impossible de fermer la base SQLite : ${shutdownError.message}`);
   });
 });

@@ -277,7 +277,7 @@ export default function AdminUsersPage({ onToast, onOpenSellerProducts }) {
     <div className="admin-page">
       <div className="page-header">
         <div>
-          <p className="page-kicker">Administration Centrale AfriStock</p>
+          <p className="page-kicker">Administration</p>
           <h2>Gestion des Utilisateurs & Boutiques</h2>
           <p className="page-subtitle">
             Supervisez tous les vendeurs, consultez le stock spécifique de chaque boutique et gérez les accès de façon sécurisée (Scrypt).
@@ -327,11 +327,11 @@ export default function AdminUsersPage({ onToast, onOpenSellerProducts }) {
             className={`subtab-btn ${activeTab === 'activity' ? 'active' : ''}`}
             onClick={() => { setActiveTab('activity'); loadActivityLogs(); }}
           >
-            ⚡ Journal direct MySQL ({activityLogs.length})
+            Journal d’activité ({activityLogs.length})
           </button>
         </div>
         <div className="live-persistence-indicator">
-          <span className="live-dot">●</span> Enregistrement instantané MySQL activé
+          <span className="live-dot">●</span> Enregistrement local instantané
         </div>
       </div>
 
@@ -367,7 +367,7 @@ export default function AdminUsersPage({ onToast, onOpenSellerProducts }) {
           {/* Table des utilisateurs */}
           <div className="panel table-panel">
             {loading ? (
-              <div className="table-loading">Chargement des utilisateurs depuis MySQL...</div>
+              <div className="table-loading">Chargement des utilisateurs…</div>
             ) : filteredUsers.length === 0 ? (
               <div className="empty-state">Aucun utilisateur ne correspond à vos filtres.</div>
             ) : (
@@ -484,7 +484,7 @@ export default function AdminUsersPage({ onToast, onOpenSellerProducts }) {
             <div>
               <h3>Journal des modifications enregistrées en direct</h3>
               <p className="modal-subtitle">
-                Chaque ajout, vente, modification de prix, stock ou mot de passe est enregistré et persisté immédiatement dans MySQL.
+                Chaque ajout, vente, modification de prix, stock ou mot de passe est enregistré tout de suite dans la base locale.
               </p>
             </div>
             <button
@@ -508,7 +508,7 @@ export default function AdminUsersPage({ onToast, onOpenSellerProducts }) {
                     <th>Auteur</th>
                     <th>Boutique</th>
                     <th>Action</th>
-                    <th>Description de la modification (Enregistrée dans MySQL)</th>
+                    <th>Description</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -681,7 +681,7 @@ export default function AdminUsersPage({ onToast, onOpenSellerProducts }) {
                 <div>
                   <strong>Sécurité maximale Scrypt :</strong>
                   <p>
-                    Ce mot de passe temporaire a été immédiatement haché de manière sécurisée dans la base MySQL. Lors de sa première connexion avec ce mot de passe, l'utilisateur sera invité à définir son mot de passe personnel.
+                    Ce mot de passe temporaire est haché tout de suite. À la première connexion, l’utilisateur devra choisir son mot de passe personnel.
                   </p>
                 </div>
               </div>
