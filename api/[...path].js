@@ -1,3 +1,3 @@
-import { app } from '../server/postgresApp.js';
+import { app } from '../server/mysqlApp.js';
 
 export default app;

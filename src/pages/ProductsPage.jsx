@@ -18,9 +18,12 @@ const emptyForm = {
   compatible_models: '',
 };
 
-export default function ProductsPage({ onToast, globalSearch, initialFamily = '' }) {
+export default function ProductsPage({ onToast, globalSearch, initialFamily = '', user }) {
+  const isAdmin = user?.role === 'admin';
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [sellers, setSellers] = useState([]);
+  const [sellerFilter, setSellerFilter] = useState('');
   const [search, setSearch] = useState('');
   const [family, setFamily] = useState(initialFamily || '');
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -39,6 +42,17 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
     setCategories(data);
   };
 
+  const loadSellers = async () => {
+    if (isAdmin) {
+      try {
+        const data = await apiRequest('/admin/users');
+        setSellers(data);
+      } catch {
+        // Ignorer si pas accès
+      }
+    }
+  };
+
   const loadProducts = async () => {
     const params = new URLSearchParams();
     if (search || globalSearch) params.set('search', search || globalSearch);
@@ -47,17 +61,19 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
     if (stockFilter !== 'all') params.set('stockStatus', stockFilter);
     if (priceMin) params.set('minPrice', priceMin);
     if (priceMax) params.set('maxPrice', priceMax);
+    if (isAdmin && sellerFilter) params.set('seller_id', sellerFilter);
     const data = await apiRequest(`/products?${params.toString()}`);
     setProducts(data);
   };
 
   useEffect(() => {
     loadCategories();
-  }, []);
+    loadSellers();
+  }, [isAdmin]);
 
   useEffect(() => {
     loadProducts();
-  }, [search, globalSearch, family, categoryFilter, stockFilter, priceMin, priceMax]);
+  }, [search, globalSearch, family, categoryFilter, stockFilter, priceMin, priceMax, sellerFilter]);
 
   const visibleCategories = useMemo(
     () => (family ? categories.filter((item) => item.family === family) : categories),
@@ -138,6 +154,16 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
 
       <div className="panel filters-panel">
         <div className="form-grid compact-grid">
+          {isAdmin && (
+            <select value={sellerFilter} onChange={(e) => setSellerFilter(e.target.value)} className="seller-select-filter">
+              <option value="">🏬 Toutes les boutiques</option>
+              {sellers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.shop_name || s.name} (@{s.username})
+                </option>
+              ))}
+            </select>
+          )}
           <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nom, référence, modèle compatible..." />
           <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="">Toutes les catégories</option>
@@ -154,7 +180,7 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
           <input type="number" value={priceMin} onChange={(e) => setPriceMin(e.target.value)} placeholder="Prix min" />
           <input type="number" value={priceMax} onChange={(e) => setPriceMax(e.target.value)} placeholder="Prix max" />
         </div>
-        <button type="button" className="ghost-button" onClick={() => { setSearch(''); setFamily(''); setCategoryFilter(''); setStockFilter('all'); setPriceMin(''); setPriceMax(''); }}>
+        <button type="button" className="ghost-button" onClick={() => { setSearch(''); setFamily(''); setCategoryFilter(''); setStockFilter('all'); setPriceMin(''); setPriceMax(''); setSellerFilter(''); }}>
           Réinitialiser
         </button>
       </div>
@@ -170,6 +196,7 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
             <table>
               <thead>
                 <tr>
+                  {isAdmin && <th>Boutique</th>}
                   <th>Référence</th>
                   <th>Catégorie</th>
                   <th>Marque / modèle</th>
@@ -185,6 +212,13 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
               <tbody>
                 {products.map((product) => (
                   <tr key={product.id}>
+                    {isAdmin && (
+                      <td>
+                        <span className="shop-badge small">
+                          🏪 {product.seller_shop || product.seller_name || 'AfriStock'}
+                        </span>
+                      </td>
+                    )}
                     <td>
                       <strong>{product.name}</strong>
                       <small>{product.reference || '—'}</small>

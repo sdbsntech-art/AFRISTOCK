@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import apiRequest from './api';
 import Notification from './components/Notification';
 import Sidebar from './components/Sidebar';
+import MustChangePasswordModal from './components/MustChangePasswordModal';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import CatalogPage from './pages/CatalogPage';
@@ -11,6 +12,7 @@ import SalesHistoryPage from './pages/SalesHistoryPage';
 import StatsPage from './pages/StatsPage';
 import SettingsPage from './pages/SettingsPage';
 import ReportPage from './pages/ReportPage';
+import AdminUsersPage from './pages/AdminUsersPage';
 
 function App() {
   const [page, setPage] = useState('dashboard');
@@ -46,8 +48,11 @@ function App() {
       body: JSON.stringify({ identifier, password }),
     });
     setUser(data.user);
-    setPage('dashboard');
-    setToast({ type: 'success', message: 'Connexion vendeur réussie.' });
+    setPage(data.user?.role === 'admin' ? 'admin-users' : 'dashboard');
+    setToast({
+      type: 'success',
+      message: data.user?.role === 'admin' ? 'Session Administrateur ouverte.' : 'Connexion réussie.',
+    });
   };
 
   const handleSignup = async (payload) => {
@@ -83,10 +88,12 @@ function App() {
 
   const renderPage = () => {
     switch (page) {
+      case 'admin-users':
+        return <AdminUsersPage onToast={setToast} onOpenSellerProducts={openStock} />;
       case 'catalog':
         return <CatalogPage onOpenFamily={openStock} />;
       case 'products':
-        return <ProductsPage onToast={setToast} globalSearch={globalSearch} initialFamily={catalogFamily} />;
+        return <ProductsPage onToast={setToast} globalSearch={globalSearch} initialFamily={catalogFamily} user={user} />;
       case 'sale':
         return <NewSalePage onToast={setToast} globalSearch={globalSearch} />;
       case 'history':
@@ -103,7 +110,7 @@ function App() {
   };
 
   if (loading) {
-    return <div className="loading-screen">Ouverture du logiciel vendeur...</div>;
+    return <div className="loading-screen">Connexion au système AfriStock...</div>;
   }
 
   if (!user) {
@@ -115,8 +122,9 @@ function App() {
     );
   }
 
-  const sellerLabel = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.name || 'Vendeur';
+  const sellerLabel = [user.first_name, user.last_name].filter(Boolean).join(' ') || user.name || 'Utilisateur';
   const shopLabel = user.shop_name || 'AfriStock';
+  const isAdmin = user.role === 'admin';
 
   return (
     <div className="app-shell">
@@ -133,21 +141,42 @@ function App() {
             />
           </div>
           <div className="topbar-user">
-            {user.logo ? <img className="avatar-image" src={user.logo} alt={shopLabel} /> : <div className="avatar">{sellerLabel.charAt(0).toUpperCase()}</div>}
+            {user.logo ? (
+              <img className="avatar-image" src={user.logo} alt={shopLabel} />
+            ) : (
+              <div className={`avatar ${isAdmin ? 'admin-avatar' : ''}`}>
+                {isAdmin ? '👑' : sellerLabel.charAt(0).toUpperCase()}
+              </div>
+            )}
             <div>
-              <strong>{sellerLabel}</strong>
+              <strong>
+                {sellerLabel} {isAdmin && <span className="topbar-role-tag">ADMIN</span>}
+              </strong>
               <small>{shopLabel}</small>
             </div>
           </div>
         </header>
+
         <div className="page-content">{renderPage()}</div>
+
         <footer className="app-footer">
-          <span>{sellerLabel}</span>
+          <span>{sellerLabel} ({isAdmin ? 'Console Admin' : 'Vendeur'})</span>
           <span>{shopLabel}</span>
           {user.phone ? <span>{user.phone}</span> : null}
+          <span className="mysql-badge">Base MySQL Laragon (afristock)</span>
         </footer>
       </main>
+
       <Notification toast={toast} />
+
+      {/* Forcer le changement de mot de passe si réinitialisé par admin */}
+      {user.must_change_password && (
+        <MustChangePasswordModal
+          user={user}
+          onPasswordChanged={(updatedUser) => setUser(updatedUser)}
+          onToast={setToast}
+        />
+      )}
     </div>
   );
 }
