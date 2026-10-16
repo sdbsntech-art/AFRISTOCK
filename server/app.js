@@ -98,7 +98,7 @@ app.use(session({
   cookie: {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: false,
     maxAge: 1000 * 60 * 60 * 12, // 12 heures
   },
 }));
@@ -265,8 +265,8 @@ app.get('/api/auth/status', asyncRoute(async (_req, res) => {
   const noUsers = Number(result.user_count) === 0;
   res.set('Cache-Control', 'no-store');
   res.json({
-    setupRequired: noUsers && process.env.NODE_ENV !== 'production',
-    setupBlocked: noUsers && process.env.NODE_ENV === 'production',
+    setupRequired: noUsers,
+    setupBlocked: false,
   });
 }));
 
@@ -362,10 +362,6 @@ app.post('/api/signup', limitAuthAttempts(), asyncRoute(async (req, res, next) =
 
   const pwdError = validatePasswordStrength(password);
   if (pwdError) return res.status(400).json({ error: pwdError });
-  if (process.env.NODE_ENV === 'production') {
-    return res.status(403).json({ error: 'L’initialisation publique est désactivée en production. Configurez le premier compte depuis un environnement local sécurisé.' });
-  }
-
   if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) {
     return res.status(400).json({ error: 'Identifiant invalide (3 à 32 caractères alphanumériques).' });
   }

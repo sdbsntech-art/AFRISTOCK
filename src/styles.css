@@ -705,6 +705,18 @@ tbody tr:hover, .data-table tr:hover td { background: #f8fafc; }
   line-height: 1.5;
 }
 
+.setup-error p {
+  margin: 0 0 10px;
+}
+
+.setup-error p:last-of-type {
+  overflow-wrap: anywhere;
+}
+
+.setup-error .secondary-button {
+  margin-top: 2px;
+}
+
 .filter-group, .admin-subtabs-bar, .activity-panel-top {
   display: flex;
   flex-wrap: wrap;

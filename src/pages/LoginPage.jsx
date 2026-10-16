@@ -34,20 +34,38 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
   const [googleClientId, setGoogleClientId] = useState('');
   const [setupRequired, setSetupRequired] = useState(false);
   const [setupBlocked, setSetupBlocked] = useState(false);
+  const [setupError, setSetupError] = useState('');
   const [checkingSetup, setCheckingSetup] = useState(true);
+  const [setupCheckKey, setSetupCheckKey] = useState(0);
   const googleBox = useRef(null);
 
   useEffect(() => {
+    let active = true;
+    setCheckingSetup(true);
+    setSetupError('');
     apiRequest('/auth/status')
       .then((data) => {
+        if (!active) return;
         setSetupRequired(Boolean(data.setupRequired));
         setSetupBlocked(Boolean(data.setupBlocked));
         setMode(data.setupRequired ? 'signup' : 'login');
       })
-      .catch((err) => setError(`Impossible de vérifier l’installation : ${err.message}`))
-      .finally(() => setCheckingSetup(false));
-    apiRequest('/auth/google-config').then((data) => setGoogleClientId(data.clientId || '')).catch(() => setGoogleClientId(''));
-  }, []);
+      .catch((err) => {
+        if (!active) return;
+        setSetupError(err.message || 'API locale indisponible.');
+      })
+      .finally(() => {
+        if (active) setCheckingSetup(false);
+      });
+    apiRequest('/auth/google-config')
+      .then((data) => {
+        if (active) setGoogleClientId(data.clientId || '');
+      })
+      .catch(() => {
+        if (active) setGoogleClientId('');
+      });
+    return () => { active = false; };
+  }, [setupCheckKey]);
 
   useEffect(() => {
     if (!googleClientId || !googleBox.current || mode === 'signup') return undefined;
@@ -131,6 +149,14 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
 
         {checkingSetup ? (
           <p className="muted-note" role="status">Vérification…</p>
+        ) : setupError ? (
+          <div className="error-box setup-error" role="alert">
+            <p>Impossible de vérifier le compte local. Le formulaire reste bloqué pour éviter une connexion à la mauvaise installation.</p>
+            <p>{setupError}</p>
+            <button type="button" className="secondary-button" onClick={() => setSetupCheckKey((key) => key + 1)}>
+              Réessayer
+            </button>
+          </div>
         ) : setupRequired ? (
           <div className="setup-notice" role="status">
             Première utilisation : créez le compte propriétaire. Ensuite, vous pourrez ajouter des vendeurs.
@@ -141,7 +167,7 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
           </div>
         ) : null}
 
-        <form className="auth-form" onSubmit={handleSubmit}>
+        {!checkingSetup && !setupError && !setupBlocked && <form className="auth-form" onSubmit={handleSubmit}>
           {mode === 'signup' && setupRequired && (
             <>
               <div className="form-grid two-columns-grid">
@@ -186,9 +212,11 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
           <button type="submit" className="primary-button" disabled={pending || checkingSetup || (mode === 'signup' && !setupRequired) || setupBlocked}>
             {pending ? 'Patientez…' : mode === 'login' ? 'Se connecter' : 'Créer mon compte'}
           </button>
-        </form>
+        </form>}
 
-        {!setupRequired && !setupBlocked && googleClientId ? <div ref={googleBox} className="google-box" /> : null}
+        {!checkingSetup && !setupError && !setupRequired && !setupBlocked && googleClientId
+          ? <div ref={googleBox} className="google-box" />
+          : null}
       </div>
     </div>
   );
