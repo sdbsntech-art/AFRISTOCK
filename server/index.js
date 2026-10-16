@@ -1,4 +1,4 @@
-import { app, pool } from './mysqlApp.js';
+import { app, closeSessionStore, pool } from './mysqlApp.js';
 
 const port = Number(process.env.PORT) || 3001;
 const host = process.env.HOST || '127.0.0.1';
@@ -14,14 +14,28 @@ const start = async () => {
 
 const shutdown = async () => {
   if (server) {
-    server.close();
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
   }
+  await closeSessionStore();
+  await pool.end();
 };
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+const handleShutdown = () => {
+  shutdown().catch((error) => {
+    console.error(`Impossible d’arrêter proprement AfriStock : ${error.message}`);
+    process.exitCode = 1;
+  });
+};
+
+process.on('SIGINT', handleShutdown);
+process.on('SIGTERM', handleShutdown);
 
 start().catch((error) => {
   console.error(`Impossible de démarrer AfriStock : ${error.message}`);
   process.exitCode = 1;
+  shutdown().catch((shutdownError) => {
+    console.error(`Impossible de fermer les connexions MySQL : ${shutdownError.message}`);
+  });
 });

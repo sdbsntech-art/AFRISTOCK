@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import apiRequest from '../api';
+import InstallAppButton from '../components/InstallAppButton';
 
 const emptySignup = {
   first_name: '',
@@ -32,9 +33,20 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const [googleClientId, setGoogleClientId] = useState('');
+  const [setupRequired, setSetupRequired] = useState(false);
+  const [setupBlocked, setSetupBlocked] = useState(false);
+  const [checkingSetup, setCheckingSetup] = useState(true);
   const googleBox = useRef(null);
 
   useEffect(() => {
+    apiRequest('/auth/status')
+      .then((data) => {
+        setSetupRequired(Boolean(data.setupRequired));
+        setSetupBlocked(Boolean(data.setupBlocked));
+        setMode(data.setupRequired ? 'signup' : 'login');
+      })
+      .catch((err) => setError(`Impossible de vérifier l’installation : ${err.message}`))
+      .finally(() => setCheckingSetup(false));
     apiRequest('/auth/google-config').then((data) => setGoogleClientId(data.clientId || '')).catch(() => setGoogleClientId(''));
   }, []);
 
@@ -114,13 +126,20 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
           <p>Espace vendeur : stock, caisse et rapport mensuel.</p>
         </div>
 
-        <div className="auth-switcher">
-          <button type="button" className={mode === 'login' ? 'tab active' : 'tab'} onClick={() => setMode('login')}>Connexion</button>
-          <button type="button" className={mode === 'signup' ? 'tab active' : 'tab'} onClick={() => setMode('signup')}>Inscription</button>
-        </div>
+        {checkingSetup ? (
+          <p className="muted-note" role="status">Vérification de l’installation…</p>
+        ) : setupRequired ? (
+          <div className="setup-notice" role="status">
+            Première installation : créez le compte propriétaire. Les inscriptions publiques seront ensuite fermées.
+          </div>
+        ) : setupBlocked ? (
+          <div className="setup-notice" role="status">
+            Aucun compte n’est initialisé. Pour éviter qu’un visiteur prenne le contrôle du site, créez le premier compte depuis votre installation locale sécurisée.
+          </div>
+        ) : null}
 
         <form className="auth-form" onSubmit={handleSubmit}>
-          {mode === 'signup' && (
+          {mode === 'signup' && setupRequired && (
             <>
               <div className="form-grid two-columns-grid">
                 <label>Prénom<input value={form.first_name} onChange={(e) => setForm({ ...form, first_name: e.target.value })} required /></label>
@@ -147,17 +166,15 @@ export default function LoginPage({ onLogin, onSignup, onGoogle }) {
             <label>Email ou identifiant<input value={identifier} onChange={(e) => setIdentifier(e.target.value)} required /></label>
           )}
 
-          <label>Mot de passe<input type="password" value={mode === 'signup' ? form.password : password} onChange={(e) => (mode === 'signup' ? setForm({ ...form, password: e.target.value }) : setPassword(e.target.value))} required /></label>
+          <label>Mot de passe<input type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} value={mode === 'signup' ? form.password : password} onChange={(e) => (mode === 'signup' ? setForm({ ...form, password: e.target.value }) : setPassword(e.target.value))} required minLength={mode === 'signup' ? 8 : undefined} maxLength={256} /></label>
           {error && <div className="error-box">{error}</div>}
-          <button type="submit" className="primary-button" disabled={pending}>
-            {pending ? 'Traitement...' : mode === 'login' ? 'Entrer dans le logiciel' : 'Créer le compte vendeur'}
+          <button type="submit" className="primary-button" disabled={pending || checkingSetup || (mode === 'signup' && !setupRequired)}>
+            {pending ? 'Traitement...' : mode === 'login' ? 'Entrer dans le logiciel' : 'Créer le compte propriétaire'}
           </button>
         </form>
 
-        <div className="auth-divider"><span>ou</span></div>
-        {googleClientId ? <div ref={googleBox} className="google-box" /> : (
-          <p className="muted-note">Connexion Google : ajoutez l’ID client dans Paramètres après la première connexion.</p>
-        )}
+        {!setupRequired && !setupBlocked && googleClientId && <div ref={googleBox} className="google-box" />}
+        <InstallAppButton />
       </div>
     </div>
   );

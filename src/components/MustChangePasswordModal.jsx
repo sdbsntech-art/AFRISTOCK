@@ -47,7 +47,7 @@ export default function MustChangePasswordModal({ user, onPasswordChanged, onToa
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
             <p className="modal-description">
-              Bonjour <strong>{user.name}</strong>, votre mot de passe a été temporairement réinitialisé par l’administrateur AfriStock. Pour des raisons strictes de sécurité, veuillez choisir votre nouveau mot de passe avant d'accéder au logiciel.
+              Bonjour <strong>{user.name}</strong>, votre compte exige un mot de passe personnel. Choisissez-le maintenant avant d'accéder au logiciel.
             </p>
 
             {error && <div className="error-box">{error}</div>}

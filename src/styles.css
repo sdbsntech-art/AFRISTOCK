@@ -21,7 +21,7 @@ html { color-scheme: dark; }
 html, body, #root {
   margin: 0;
   min-height: 100%;
-  font-family: Outfit, "Segoe UI", sans-serif;
+  font-family: system-ui, "Segoe UI", sans-serif;
   color: var(--text);
 }
 
@@ -819,6 +819,151 @@ tbody tr:hover { background: rgba(255, 255, 255, 0.04); }
   vertical-align: middle;
 }
 
+#root { min-height: 100dvh; }
+
+.install-app-button {
+  flex: 0 0 auto;
+  min-height: 42px;
+  padding: 9px 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(185, 208, 255, 0.12);
+  color: var(--accent-2);
+  font-weight: 700;
+}
+
+.setup-notice {
+  margin: 0 0 14px;
+  padding: 12px;
+  border: 1px solid rgba(126, 224, 200, 0.35);
+  border-radius: 14px;
+  background: rgba(126, 224, 200, 0.08);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+@media (max-width: 980px) {
+  .app-shell { min-height: 100dvh; }
+  .sidebar {
+    width: 100%;
+    min-width: 0;
+    padding: 9px 12px;
+    gap: 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand-block { flex: 1 1 180px; min-width: 0; }
+  .brand-block strong, .brand-block small {
+    max-width: 48vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .side-nav {
+    order: 3;
+    width: 100%;
+    flex-direction: row;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+  }
+  .nav-item { flex: 0 0 auto; white-space: nowrap; }
+  .user-card {
+    display: flex;
+    flex: 1 1 180px;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
+    margin: 0;
+    padding: 4px 0;
+    border: 0;
+    background: transparent;
+  }
+  .user-card-header { margin: 0; }
+  .user-card-title, .user-email { display: none; }
+  .user-name {
+    max-width: 30vw;
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .logout-button { width: auto; min-height: 40px; margin: 0; padding: 8px 10px; }
+  .topbar { flex-direction: row; align-items: center; flex-wrap: wrap; padding: 12px; }
+  .search-box { flex: 1 1 100%; order: 2; min-width: 0; }
+  .topbar-user { flex: 1; min-width: 0; }
+  .topbar-user > div:last-child { min-width: 0; }
+  .topbar-user strong, .topbar-user small {
+    max-width: 52vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .page-content { padding: 16px; }
+  .stats-grid, .two-columns, .sales-layout, .settings-layout, .compact-grid, .two-columns-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .table-panel, .panel { min-width: 0; }
+  .modal-card { width: min(900px, 100%); max-height: calc(100dvh - 28px); }
+}
+
+@media (max-width: 640px) {
+  input, textarea, select, button { font-size: 16px; }
+  .auth-page {
+    min-height: 100dvh;
+    padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  }
+  .auth-card { padding: 22px 16px; border-radius: 22px; }
+  .app-shell { width: 100%; overflow-x: clip; }
+  .sidebar { padding: 8px; }
+  .brand-block { flex-basis: 100%; }
+  .brand-block strong, .brand-block small { max-width: 68vw; }
+  .user-card { justify-content: space-between; flex-basis: 100%; }
+  .user-name { max-width: 42vw; }
+  .side-nav { margin: 0 -4px; padding: 0 4px 3px; }
+  .nav-item { padding: 10px 12px; }
+  .topbar { gap: 10px; padding: 10px 12px; }
+  .search-box { padding: 0 11px; }
+  .topbar-user { flex-basis: 0; }
+  .topbar-user strong, .topbar-user small { max-width: 50vw; }
+  .install-app-button { min-height: 40px; padding: 8px 10px; }
+  .page-content { padding: 12px; }
+  .page-topbar, .page-header, .section-header { align-items: stretch; }
+  .page-topbar > button, .page-header > button { width: 100%; }
+  .stats-grid, .two-columns, .sales-layout, .settings-layout, .compact-grid, .two-columns-grid,
+  .metrics-grid, .form-grid.two-columns-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .panel, .stat-card { padding: 14px; border-radius: 17px; }
+  .family-rail { flex-wrap: nowrap; overflow-x: auto; margin: 0 -2px; padding: 2px 2px 5px; }
+  .family-chip { flex: 0 0 auto; white-space: nowrap; }
+  .family-grid { grid-template-columns: minmax(0, 1fr); }
+  .table-wrapper { margin: 0 -4px; }
+  table { min-width: 820px; }
+  th, td { padding: 10px 8px; }
+  .actions-cell { min-width: 132px; }
+  .modal-backdrop { align-items: end; padding: 0; }
+  .modal-card {
+    width: 100%;
+    max-height: 92dvh;
+    padding: 16px 14px max(16px, env(safe-area-inset-bottom));
+    border-radius: 22px 22px 0 0;
+  }
+  .modal-actions { flex-direction: column-reverse; }
+  .modal-actions > button { width: 100%; min-height: 44px; }
+  .product-list, .cart-list { max-height: 42dvh; }
+  .app-footer { gap: 7px 12px; padding: 10px; font-size: 0.76rem; }
+  .app-footer span + span::before { margin-right: 10px; }
+  .toast { right: 12px; bottom: max(14px, env(safe-area-inset-bottom)); left: 12px; text-align: center; }
+}
+
+@media (max-width: 380px) {
+  .avatar, .avatar-image { width: 34px; height: 34px; }
+  .topbar-user { gap: 7px; }
+  .install-app-button { font-size: 14px; }
+}
+
 .admin-avatar {
   background: linear-gradient(135deg, #d97706, #f59e0b) !important;
   box-shadow: 0 0 15px rgba(245, 158, 11, 0.4);
@@ -1352,5 +1497,3 @@ tbody tr:hover { background: rgba(255, 255, 255, 0.04); }
   color: var(--text);
   font-size: 0.88rem;
 }
-
-

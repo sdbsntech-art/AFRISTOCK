@@ -18,40 +18,57 @@ export const hashPassword = (password) => {
   return `scrypt$v=1$N=32768$r=8$p=1$${salt}$${key.toString('hex')}`;
 };
 
+export const isCurrentPasswordHash = (stored) => (
+  typeof stored === 'string'
+  && /^scrypt\$v=1\$N=32768\$r=8\$p=1\$[a-f0-9]{32}\$[a-f0-9]{128}$/i.test(stored)
+);
+
+export const isLegacyScryptHash = (stored) => {
+  if (typeof stored !== 'string' || !stored.startsWith('scrypt:')) return false;
+  const parts = stored.split(':');
+  return parts.length === 3
+    && parts[1].length > 0
+    && parts[1].length <= 256
+    && /^[a-f0-9]{128}$/i.test(parts[2]);
+};
+
 /**
  * Verify a plain-text password against a stored hash using constant-time comparison.
  */
 export const verifyPassword = (password, stored) => {
-  if (!password || !stored || typeof stored !== 'string') return false;
+  if (!password || typeof password !== 'string' || !stored || typeof stored !== 'string') return false;
 
   // Legacy format scrypt:salt:hash
   if (stored.startsWith('scrypt:')) {
-    const [, salt, hash] = stored.split(':');
-    if (!salt || !hash) return false;
+    if (!isLegacyScryptHash(stored)) return false;
+    const parts = stored.split(':');
+    const [, salt, hash] = parts;
     const actual = crypto.scryptSync(password, salt, 64);
     const expected = Buffer.from(hash, 'hex');
     return expected.length === actual.length && crypto.timingSafeEqual(actual, expected);
   }
 
+  if (stored.startsWith('scrypt$') && !isCurrentPasswordHash(stored)) return false;
+
   // Standard scrypt$v=1$...
-  if (!stored.startsWith('scrypt$v=1$N=32768$r=8$p=1$')) {
-    // In case of plain text legacy fallback during migration
-    return stored === password;
+  if (isCurrentPasswordHash(stored)) {
+    const parts = stored.split('$');
+    const salt = parts[5];
+    const hash = parts[6];
+    const actual = crypto.scryptSync(password, salt, 64, {
+      N: 32768,
+      r: 8,
+      p: 1,
+      maxmem: 64 * 1024 * 1024,
+    });
+    const expected = Buffer.from(hash, 'hex');
+    return crypto.timingSafeEqual(actual, expected);
   }
 
-  const parts = stored.split('$');
-  const salt = parts[5];
-  const hash = parts[6];
-  if (!salt || !hash) return false;
-
-  const actual = crypto.scryptSync(password, salt, 64, {
-    N: 32768,
-    r: 8,
-    p: 1,
-    maxmem: 64 * 1024 * 1024,
-  });
-  const expected = Buffer.from(hash, 'hex');
-  return expected.length === actual.length && crypto.timingSafeEqual(actual, expected);
+  // Verify old plaintext records only so a successful login can upgrade them to scrypt.
+  const actual = Buffer.from(password);
+  const expected = Buffer.from(stored);
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 };
 
 /**

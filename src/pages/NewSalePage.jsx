@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import apiRequest from '../api';
-import { FAMILIES, formatCurrency } from '../lib/format';
+import { formatCurrency } from '../lib/format';
 
 export default function NewSalePage({ onToast, globalSearch }) {
   const [products, setProducts] = useState([]);
+  const [families, setFamilies] = useState([]);
   const [search, setSearch] = useState('');
   const [family, setFamily] = useState('');
   const [cart, setCart] = useState([]);
@@ -19,6 +20,12 @@ export default function NewSalePage({ onToast, globalSearch }) {
   useEffect(() => {
     loadProducts();
   }, [search, globalSearch, family]);
+
+  useEffect(() => {
+    apiRequest('/catalog/families').then(setFamilies).catch((error) => {
+      onToast({ type: 'error', message: error.message });
+    });
+  }, [onToast]);
 
   const addToCart = (product) => {
     const existing = cart.find((item) => item.id === product.id);
@@ -70,7 +77,7 @@ export default function NewSalePage({ onToast, globalSearch }) {
       </div>
 
       <div className="family-rail">
-        {FAMILIES.map((item) => (
+        {[{ id: '', label: 'Tous les produits' }, ...families.map((item) => ({ id: item.id, label: item.label }))].map((item) => (
           <button key={item.id || 'all'} type="button" className={family === item.id ? 'family-chip active' : 'family-chip'} onClick={() => setFamily(item.id)}>
             {item.label}
           </button>

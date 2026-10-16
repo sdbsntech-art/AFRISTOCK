@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import apiRequest from '../api';
-import { FAMILIES, FAMILY_LABELS, formatCurrency } from '../lib/format';
+import { formatCurrency } from '../lib/format';
 
 const emptyForm = {
   id: null,
@@ -79,6 +79,10 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
     () => (family ? categories.filter((item) => item.family === family) : categories),
     [categories, family],
   );
+  const families = useMemo(
+    () => [...new Set(categories.map((category) => category.family).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [categories],
+  );
 
   const handleSaveProduct = async (event) => {
     event.preventDefault();
@@ -132,7 +136,7 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
       <div className="page-topbar">
         <div>
           <p className="page-kicker">Inventaire interne</p>
-          <h2>Stock {family ? `· ${FAMILY_LABELS[family] || ''}` : ''}</h2>
+          <h2>Stock {family ? `· ${family}` : ''}</h2>
         </div>
         <button type="button" className="primary-button" onClick={() => { setForm(emptyForm); setShowForm(true); }}>
           Ajouter une référence
@@ -140,7 +144,7 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
       </div>
 
       <div className="family-rail">
-        {FAMILIES.map((item) => (
+        {[{ id: '', label: 'Tout le stock' }, ...families.map((item) => ({ id: item, label: item }))].map((item) => (
           <button
             key={item.id || 'all'}
             type="button"

@@ -3,6 +3,7 @@ import apiRequest from './api';
 import Notification from './components/Notification';
 import Sidebar from './components/Sidebar';
 import MustChangePasswordModal from './components/MustChangePasswordModal';
+import InstallAppButton from './components/InstallAppButton';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import CatalogPage from './pages/CatalogPage';
@@ -61,8 +62,8 @@ function App() {
       body: JSON.stringify(payload),
     });
     setUser(data.user);
-    setPage('dashboard');
-    setToast({ type: 'success', message: 'Compte vendeur créé.' });
+    setPage(data.user?.role === 'admin' ? 'admin-users' : 'dashboard');
+    setToast({ type: 'success', message: data.user?.role === 'admin' ? 'Compte propriétaire créé.' : 'Compte vendeur créé.' });
   };
 
   const handleGoogle = async (credential) => {
@@ -91,7 +92,7 @@ function App() {
       case 'admin-users':
         return <AdminUsersPage onToast={setToast} onOpenSellerProducts={openStock} />;
       case 'catalog':
-        return <CatalogPage onOpenFamily={openStock} />;
+        return <CatalogPage onOpenFamily={openStock} onManageCategories={() => setPage('settings')} />;
       case 'products':
         return <ProductsPage onToast={setToast} globalSearch={globalSearch} initialFamily={catalogFamily} user={user} />;
       case 'sale':
@@ -155,6 +156,7 @@ function App() {
               <small>{shopLabel}</small>
             </div>
           </div>
+          <InstallAppButton />
         </header>
 
         <div className="page-content">{renderPage()}</div>

@@ -4,49 +4,23 @@ import session from 'express-session';
 import crypto from 'node:crypto';
 import mysql from 'mysql2/promise';
 import connectMySQLStore from 'express-mysql-session';
-import { CATEGORY_FAMILIES } from '../database/catalog.js';
 import { DEFAULT_SHOP_NAME, fullName, publicUser } from './userProfile.js';
 import { buildMonthlyAnalysis } from './reportEngine.js';
 import {
   hashPassword,
+  isCurrentPasswordHash,
   verifyPassword,
   generateSecurePassword,
   validatePasswordStrength,
 } from './security.js';
+import { getMySqlConfig, getSessionSecret } from './databaseConfig.js';
 
 // Configuration du pool MySQL (supporte Laragon en local et les bases Cloud en production)
-const poolConfig = process.env.MYSQL_URL
-  ? { uri: process.env.MYSQL_URL }
-  : {
-      host: process.env.MYSQL_HOST || '127.0.0.1',
-      port: Number(process.env.MYSQL_PORT) || 3306,
-      user: process.env.MYSQL_USER || 'root',
-      password: process.env.MYSQL_PASSWORD || '',
-      database: process.env.MYSQL_DATABASE || 'afristock',
-    };
-
-const isRemoteDb = (poolConfig.host && poolConfig.host !== '127.0.0.1' && poolConfig.host !== 'localhost') || process.env.MYSQL_URL;
-const sslConfig = process.env.MYSQL_SSL === 'true' || (isRemoteDb && process.env.MYSQL_SSL !== 'false')
-  ? { rejectUnauthorized: process.env.MYSQL_SSL_REJECT_UNAUTHORIZED === 'true' }
-  : undefined;
-
-const pool = mysql.createPool({
-  ...poolConfig,
-  waitForConnections: true,
-  connectionLimit: Number(process.env.MYSQL_POOL_SIZE) || 10,
-  queueLimit: 0,
-  charset: 'utf8mb4',
-  timezone: 'Z',
-  dateStrings: true,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 10000,
-  connectTimeout: 15000,
-  ...(sslConfig ? { ssl: sslConfig } : {}),
-});
+const pool = mysql.createPool(getMySqlConfig());
 
 pool.on('error', (error) => console.error(`[MySQL] Erreur de connexion au pool : ${error.message}`));
 
-const sessionSecret = process.env.SESSION_SECRET || 'afristock_super_secret_session_key_2026';
+const sessionSecret = getSessionSecret();
 
 const app = express();
 const MySQLStore = connectMySQLStore(session);
@@ -189,6 +163,16 @@ const numericRow = (row, fields) => (row ? numericRows([row], fields)[0] : null)
 // AUTHENTIFICATION & SESSIONS
 // =====================================================================
 
+app.get('/api/auth/status', asyncRoute(async (_req, res) => {
+  const [[result]] = await pool.query('SELECT COUNT(*) AS user_count FROM users');
+  const noUsers = Number(result.user_count) === 0;
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    setupRequired: noUsers && process.env.NODE_ENV !== 'production',
+    setupBlocked: noUsers && process.env.NODE_ENV === 'production',
+  });
+}));
+
 app.get('/api/auth/google-config', asyncRoute(async (_req, res) => {
   res.json({ clientId: process.env.GOOGLE_CLIENT_ID || await getSetting('google_client_id') });
 }));
@@ -208,7 +192,7 @@ app.post('/api/login', limitAuthAttempts, asyncRoute(async (req, res, next) => {
   const identifier = String(req.body?.identifier || '').trim();
   const pass = String(req.body?.password || '');
 
-  if (!identifier || !pass) {
+  if (!identifier || !pass || pass.length > 256) {
     return res.status(400).json({ error: 'Identifiant et mot de passe requis.' });
   }
 
@@ -227,7 +211,7 @@ app.post('/api/login', limitAuthAttempts, asyncRoute(async (req, res, next) => {
   }
 
   // Si ancien hash non standard ou besoin de rehash
-  if (!user.password.startsWith('scrypt$v=1$N=32768$r=8$p=1$')) {
+  if (!isCurrentPasswordHash(user.password)) {
     await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashPassword(pass), user.id]);
   }
 
@@ -266,9 +250,16 @@ app.post('/api/signup', limitAuthAttempts, asyncRoute(async (req, res, next) => 
   if (!firstName || !lastName || !username || !email || !password) {
     return res.status(400).json({ error: 'Prénom, nom, identifiant, email et mot de passe sont obligatoires.' });
   }
+  if (!validText(firstName, 128) || !validText(lastName, 128) || !validText(phone, 64)
+    || !validText(shopName, 254)) {
+    return res.status(400).json({ error: 'Un ou plusieurs champs dépassent la longueur maximale autorisée.' });
+  }
 
   const pwdError = validatePasswordStrength(password);
   if (pwdError) return res.status(400).json({ error: pwdError });
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(403).json({ error: 'L’initialisation publique est désactivée en production. Configurez le premier compte depuis un environnement local sécurisé.' });
+  }
 
   if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) {
     return res.status(400).json({ error: 'Identifiant invalide (3 à 32 caractères alphanumériques).' });
@@ -280,31 +271,50 @@ app.post('/api/signup', limitAuthAttempts, asyncRoute(async (req, res, next) => 
     return res.status(400).json({ error: 'Format de logo non autorisé.' });
   }
 
-  const [existing] = await pool.query('SELECT id FROM users WHERE email = ? OR username = ?', [email, username]);
-  if (existing.length > 0) {
-    return res.status(409).json({ error: 'Un compte avec cet email ou cet identifiant existe déjà.' });
+  const connection = await pool.getConnection();
+  let setupLock = false;
+  let userId;
+  try {
+    const [[lock]] = await connection.query("SELECT GET_LOCK('afristock-initial-owner', 10) AS acquired");
+    if (Number(lock.acquired) !== 1) {
+      return res.status(503).json({ error: 'Initialisation occupée. Réessayez dans quelques secondes.' });
+    }
+    setupLock = true;
+    const [[result]] = await connection.query('SELECT COUNT(*) AS user_count FROM users');
+    if (Number(result.user_count) !== 0) {
+      return res.status(403).json({ error: 'La création publique est fermée. Demandez un compte à l’administrateur.' });
+    }
+
+    const [created] = await connection.query(`
+      INSERT INTO users (name, username, email, password, role, status, first_name, last_name, phone, shop_name, logo, must_change_password)
+      VALUES (?, ?, ?, ?, 'admin', 'active', ?, ?, ?, ?, ?, 0)
+    `, [
+      safeName,
+      username,
+      email,
+      hashPassword(password),
+      firstName,
+      lastName,
+      phone,
+      shopName,
+      logo,
+    ]);
+    userId = created.insertId;
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'Un compte avec cet email ou cet identifiant existe déjà.' });
+    }
+    throw error;
+  } finally {
+    if (setupLock) await connection.query("SELECT RELEASE_LOCK('afristock-initial-owner')");
+    connection.release();
   }
 
-  const [result] = await pool.query(`
-    INSERT INTO users (name, username, email, password, role, status, first_name, last_name, phone, shop_name, logo, must_change_password)
-    VALUES (?, ?, ?, ?, 'seller', 'active', ?, ?, ?, ?, ?, 0)
-  `, [
-    safeName,
-    username,
-    email,
-    hashPassword(password),
-    firstName,
-    lastName,
-    phone,
-    shopName,
-    logo,
-  ]);
-
-  const newUser = await loadUser(result.insertId);
+  const newUser = await loadUser(userId);
   try {
     res.status(201).json({
       user: await regenerateSession(req, newUser),
-      message: 'Compte vendeur créé avec succès.',
+      message: 'Compte administrateur principal créé.',
     });
   } catch (error) {
     next(error);
@@ -333,29 +343,9 @@ app.post('/api/auth/google', limitAuthAttempts, asyncRoute(async (req, res) => {
     let user = rows[0];
 
     if (!user) {
-      const usernameBase = email.split('@')[0].replace(/[^a-z0-9]/gi, '').slice(0, 18) || 'vendeur';
-      let username = usernameBase;
-      let suffix = 1;
-      while ((await pool.query('SELECT id FROM users WHERE username = ?', [username]))[0].length > 0) {
-        username = `${usernameBase}${suffix}`;
-        suffix += 1;
-      }
-      const [insertResult] = await pool.query(`
-        INSERT INTO users (name, username, email, password, role, status, first_name, last_name, phone, shop_name, logo, google_id)
-        VALUES (?, ?, ?, ?, 'seller', 'active', ?, ?, '', ?, ?, ?)
-      `, [
-        display,
-        username,
-        email,
-        hashPassword(crypto.randomBytes(32).toString('hex')),
-        given || display,
-        family,
-        DEFAULT_SHOP_NAME,
-        validLogo(payload.picture) ? payload.picture : '',
-        payload.sub,
-      ]);
-      user = await loadUser(insertResult.insertId);
-    } else if (!user.google_id) {
+      return res.status(403).json({ error: 'La connexion Google ne crée pas de compte. Créez le premier compte administrateur avec le formulaire sécurisé.' });
+    }
+    if (!user.google_id) {
       await pool.query('UPDATE users SET google_id = ? WHERE id = ?', [payload.sub, user.id]);
       user = await loadUser(user.id);
     }
@@ -756,42 +746,59 @@ app.put('/api/settings/google', requireAdmin, asyncRoute(async (req, res) => {
 
 app.get('/api/catalog/families', requireAuth, asyncRoute(async (req, res) => {
   const sessionUser = getSessionUser(req);
-  const sellerId = sessionUser.role === 'admin' && req.query.seller_id ? Number(req.query.seller_id) : (sessionUser.role === 'admin' ? null : sessionUser.id);
-
+  const sellerId = sessionUser.role === 'admin' && validId(req.query.seller_id)
+    ? Number(req.query.seller_id)
+    : (sessionUser.role === 'admin' ? null : sessionUser.id);
   let query = `
-    SELECT c.family, COUNT(p.id) AS product_count, COALESCE(SUM(p.quantity), 0) AS stock_count
-    FROM categories c 
-    LEFT JOIN products p ON p.category = c.name
+    SELECT c.family, COUNT(DISTINCT c.id) AS category_count,
+      COUNT(DISTINCT p.id) AS product_count, COALESCE(SUM(p.quantity), 0) AS stock_count
+    FROM categories c
+    LEFT JOIN products p ON p.category = c.name AND p.user_id = c.user_id
   `;
   const params = [];
   if (sellerId) {
-    query += ' AND p.user_id = ?';
+    query += ' WHERE c.user_id = ?';
     params.push(sellerId);
+  } else if (sessionUser.role !== 'admin') {
+    query += ' WHERE c.user_id = ? OR c.user_id IS NULL';
+    params.push(sessionUser.id);
   }
-  query += ' GROUP BY c.family';
-
+  query += ' GROUP BY c.family ORDER BY c.family ASC';
   const [rows] = await pool.query(query, params);
-  const map = new Map(numericRows(rows, ['product_count', 'stock_count']).map((row) => [row.family, row]));
-
-  res.json(CATEGORY_FAMILIES.map((fam) => ({
-    ...fam,
-    product_count: Number(map.get(fam.id)?.product_count || 0),
-    stock_count: Number(map.get(fam.id)?.stock_count || 0),
+  res.json(numericRows(rows, ['category_count', 'product_count', 'stock_count']).map((row) => ({
+    id: row.family,
+    label: row.family,
+    hint: `${row.category_count} catégorie${row.category_count === 1 ? '' : 's'}`,
+    product_count: row.product_count,
+    stock_count: row.stock_count,
   })));
 }));
 
 app.get('/api/categories', requireAuth, asyncRoute(async (req, res) => {
   const { family } = req.query;
-  const [rows] = family
-    ? await pool.query('SELECT * FROM categories WHERE family = ? ORDER BY name ASC', [family])
-    : await pool.query('SELECT * FROM categories ORDER BY family ASC, name ASC');
+  const sessionUser = getSessionUser(req);
+  const conditions = [];
+  const params = [];
+  if (sessionUser.role !== 'admin') {
+    conditions.push('(user_id = ? OR user_id IS NULL)');
+    params.push(sessionUser.id);
+  }
+  if (family) {
+    conditions.push('family = ?');
+    params.push(String(family));
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const [rows] = await pool.query(`SELECT * FROM categories ${where} ORDER BY family ASC, name ASC`, params);
   res.json(rows);
 }));
 
 app.post('/api/categories', requireAuth, asyncRoute(async (req, res) => {
   const label = String(req.body?.name || '').trim();
-  const family = String(req.body?.family || 'autres').trim() || 'autres';
-  if (!label) return res.status(400).json({ error: 'Le nom de la catégorie est obligatoire.' });
+  const family = String(req.body?.family || '').trim();
+  if (!label || !family) return res.status(400).json({ error: 'Le nom et le rayon de la catégorie sont obligatoires.' });
+  if (label.length > 191 || family.length > 191) {
+    return res.status(400).json({ error: 'Le nom et le rayon sont limités à 191 caractères.' });
+  }
 
   try {
     const [result] = await pool.query('INSERT INTO categories (name, family, user_id) VALUES (?, ?, ?)', [
@@ -802,24 +809,51 @@ app.post('/api/categories', requireAuth, asyncRoute(async (req, res) => {
     const [inserted] = await pool.query('SELECT * FROM categories WHERE id = ?', [result.insertId]);
     res.status(201).json({ category: inserted[0], message: 'Catégorie créée avec succès.' });
   } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Cette catégorie existe déjà.' });
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Cette catégorie existe déjà dans votre boutique.' });
     throw error;
   }
 }));
 
 app.put('/api/categories/:id', requireAuth, asyncRoute(async (req, res) => {
   const label = String(req.body?.name || '').trim();
-  const family = String(req.body?.family || 'autres').trim() || 'autres';
-  if (!label) return res.status(400).json({ error: 'Le nom de la catégorie est obligatoire.' });
+  const family = String(req.body?.family || '').trim();
+  if (!validId(req.params.id)) return res.status(400).json({ error: 'Identifiant invalide.' });
+  if (!label || !family) return res.status(400).json({ error: 'Le nom et le rayon de la catégorie sont obligatoires.' });
+  if (label.length > 191 || family.length > 191) {
+    return res.status(400).json({ error: 'Le nom et le rayon sont limités à 191 caractères.' });
+  }
 
-  await pool.query('UPDATE categories SET name = ?, family = ? WHERE id = ?', [label, family, Number(req.params.id)]);
+  const sessionUser = getSessionUser(req);
+  const ownerCondition = sessionUser.role === 'admin' ? '' : ' AND user_id = ?';
+  const params = [label, family, Number(req.params.id)];
+  if (sessionUser.role !== 'admin') params.push(sessionUser.id);
+  try {
+    const [result] = await pool.query(
+      `UPDATE categories SET name = ?, family = ? WHERE id = ?${ownerCondition}`,
+      params,
+    );
+    if (!result.affectedRows) {
+      const [same] = await pool.query(
+        `SELECT id FROM categories WHERE id = ?${ownerCondition}`,
+        sessionUser.role === 'admin' ? [Number(req.params.id)] : [Number(req.params.id), sessionUser.id],
+      );
+      if (!same.length) return res.status(404).json({ error: 'Catégorie introuvable.' });
+    }
+  } catch (error) {
+    if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Cette catégorie existe déjà dans votre boutique.' });
+    throw error;
+  }
   const [rows] = await pool.query('SELECT * FROM categories WHERE id = ?', [Number(req.params.id)]);
   if (!rows.length) return res.status(404).json({ error: 'Catégorie introuvable.' });
   res.json({ category: rows[0], message: 'Catégorie mise à jour.' });
 }));
 
 app.delete('/api/categories/:id', requireAuth, asyncRoute(async (req, res) => {
-  const [resDel] = await pool.query('DELETE FROM categories WHERE id = ?', [Number(req.params.id)]);
+  if (!validId(req.params.id)) return res.status(400).json({ error: 'Identifiant invalide.' });
+  const sessionUser = getSessionUser(req);
+  const ownerCondition = sessionUser.role === 'admin' ? '' : ' AND user_id = ?';
+  const params = sessionUser.role === 'admin' ? [Number(req.params.id)] : [Number(req.params.id), sessionUser.id];
+  const [resDel] = await pool.query(`DELETE FROM categories WHERE id = ?${ownerCondition}`, params);
   if (!resDel.affectedRows) return res.status(404).json({ error: 'Catégorie introuvable.' });
   res.json({ message: 'Catégorie supprimée.' });
 }));
@@ -894,7 +928,7 @@ app.get('/api/products', requireAuth, asyncRoute(async (req, res) => {
     SELECT p.*, c.family AS category_family,
            u.shop_name AS seller_shop, u.name AS seller_name, u.username AS seller_username
     FROM products p
-    LEFT JOIN categories c ON c.name = p.category
+    LEFT JOIN categories c ON c.name = p.category AND (c.user_id = p.user_id OR c.user_id IS NULL)
     LEFT JOIN users u ON u.id = p.user_id
     ${whereClause}
     ORDER BY p.category ASC, p.name ASC
@@ -936,6 +970,14 @@ const readProductInput = (body) => ({
   compatible_models: String(body.compatible_models || '').trim(),
 });
 
+const categoryBelongsToUser = async (categoryName, userId) => {
+  const [rows] = await pool.query(
+    'SELECT id FROM categories WHERE name = ? AND (user_id = ? OR user_id IS NULL) LIMIT 1',
+    [categoryName, userId],
+  );
+  return rows.length > 0;
+};
+
 app.post('/api/products', requireAuth, asyncRoute(async (req, res) => {
   const sessionUser = getSessionUser(req);
   const p = readProductInput(req.body || {});
@@ -946,11 +988,22 @@ app.post('/api/products', requireAuth, asyncRoute(async (req, res) => {
   if (![p.quantity, p.threshold, p.price_buy, p.price_sale].every(validNonNegativeInt)) {
     return res.status(400).json({ error: 'Quantité, seuil et prix doivent être des entiers positifs ou nuls.' });
   }
+  if (!validText(p.name, 255) || !validText(p.category, 191) || !validText(p.brand, 191)
+    || !validText(p.model, 191) || !validText(p.reference, 191) || !validText(p.location, 255)) {
+    return res.status(400).json({ error: 'Un ou plusieurs champs dépassent la longueur maximale autorisée.' });
+  }
 
   // Déterminer le user_id cible (admin peut assigner à un vendeur spécifique)
   let targetUserId = sessionUser.id;
   if (sessionUser.role === 'admin' && req.body?.user_id && validId(req.body.user_id)) {
     targetUserId = Number(req.body.user_id);
+    const target = await loadUser(targetUserId);
+    if (!target || target.status !== 'active') {
+      return res.status(400).json({ error: 'La boutique destinataire est introuvable ou inactive.' });
+    }
+  }
+  if (!await categoryBelongsToUser(p.category, targetUserId)) {
+    return res.status(400).json({ error: 'Choisissez une catégorie créée dans votre boutique.' });
   }
 
   const created = await withTransaction(async (conn) => {
@@ -1009,6 +1062,19 @@ app.put('/api/products/:id', requireAuth, asyncRoute(async (req, res) => {
 
   if (sessionUser.role !== 'admin' && existing[0].user_id !== sessionUser.id) {
     return res.status(403).json({ error: 'Vous n’êtes pas autorisé à modifier ce produit.' });
+  }
+  if (!p.name || !p.category || !p.brand || !p.model) {
+    return res.status(400).json({ error: 'Nom, catégorie, marque et modèle sont obligatoires.' });
+  }
+  if (![p.quantity, p.threshold, p.price_buy, p.price_sale].every(validNonNegativeInt)) {
+    return res.status(400).json({ error: 'Quantité, seuil et prix doivent être des entiers positifs ou nuls.' });
+  }
+  if (!validText(p.name, 255) || !validText(p.category, 191) || !validText(p.brand, 191)
+    || !validText(p.model, 191) || !validText(p.reference, 191) || !validText(p.location, 255)) {
+    return res.status(400).json({ error: 'Un ou plusieurs champs dépassent la longueur maximale autorisée.' });
+  }
+  if (!await categoryBelongsToUser(p.category, Number(existing[0].user_id))) {
+    return res.status(400).json({ error: 'Choisissez une catégorie créée dans la boutique propriétaire du produit.' });
   }
 
   await pool.query(`
@@ -1531,5 +1597,7 @@ app.use((error, _req, res, _next) => {
   if (error.code === 'ER_ROW_IS_REFERENCED_2') return res.status(409).json({ error: 'Cette donnée est utilisée par d’autres éléments.' });
   res.status(500).json({ error: error.message || 'Une erreur serveur inattendue est survenue.' });
 });
+
+export const closeSessionStore = () => sessionStore.close();
 
 export { app, pool };

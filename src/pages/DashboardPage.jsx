@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import apiRequest from '../api';
-import { FAMILY_LABELS, formatCurrency } from '../lib/format';
+import { formatCurrency } from '../lib/format';
 
 export default function DashboardPage({ onToast, onOpenStock }) {
   const [range, setRange] = useState('today');
@@ -95,7 +95,7 @@ export default function DashboardPage({ onToast, onOpenStock }) {
           <div className="simple-list">
             {(dashboard.familyStock || []).map((row) => (
               <button key={row.family} type="button" className="list-row" onClick={() => onOpenStock?.(row.family)}>
-                <strong>{FAMILY_LABELS[row.family] || row.family}</strong>
+                <strong>{row.family}</strong>
                 <span>{row.stock} pcs</span>
               </button>
             ))}

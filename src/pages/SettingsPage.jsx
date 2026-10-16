@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import apiRequest from '../api';
-import { FAMILIES, FAMILY_LABELS } from '../lib/format';
 
 const readLogo = (file) => new Promise((resolve, reject) => {
   if (!file) return resolve(undefined);
@@ -17,7 +16,7 @@ const readLogo = (file) => new Promise((resolve, reject) => {
 export default function SettingsPage({ onToast, user, onUserUpdate }) {
   const [categories, setCategories] = useState([]);
   const [name, setName] = useState('');
-  const [family, setFamily] = useState('autres');
+  const [family, setFamily] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [googleClientId, setGoogleClientId] = useState('');
   const [profile, setProfile] = useState({
@@ -109,7 +108,7 @@ export default function SettingsPage({ onToast, user, onUserUpdate }) {
         await apiRequest('/categories', { method: 'POST', body: JSON.stringify({ name, family }) });
       }
       setName('');
-      setFamily('autres');
+      setFamily('');
       setEditingId(null);
       loadCategories();
       onToast({ type: 'success', message: editingId ? 'Catégorie modifiée.' : 'Catégorie ajoutée.' });
@@ -214,20 +213,17 @@ export default function SettingsPage({ onToast, user, onUserUpdate }) {
         <form onSubmit={saveCategory} className="category-form">
           <h3>{editingId ? 'Modifier' : 'Nouvelle catégorie'}</h3>
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex. Écrans Google Pixel" />
-          <select value={family} onChange={(e) => setFamily(e.target.value)}>
-            {FAMILIES.filter((item) => item.id).map((item) => (
-              <option key={item.id} value={item.id}>{item.label}</option>
-            ))}
-          </select>
+          <input type="text" value={family} onChange={(e) => setFamily(e.target.value)} placeholder="Rayon / famille" required maxLength={191} />
+          <p className="muted-note">Créez vos catégories et rayons. Rien n’est prérempli.</p>
           <button type="submit" className="primary-button">{editingId ? 'Mettre à jour' : 'Ajouter'}</button>
         </form>
         <div className="tag-list">
           {categories.map((category) => (
             <div key={category.id} className="tag-item">
               <span>{category.name}</span>
-              <em>{FAMILY_LABELS[category.family] || category.family}</em>
+              <em>{category.family}</em>
               <div className="tag-actions">
-                <button type="button" className="link-button" onClick={() => { setName(category.name); setFamily(category.family || 'autres'); setEditingId(category.id); }}>Modifier</button>
+                <button type="button" className="link-button" onClick={() => { setName(category.name); setFamily(category.family || ''); setEditingId(category.id); }}>Modifier</button>
                 <button type="button" className="link-button danger" onClick={() => deleteCategory(category.id)}>Supprimer</button>
               </div>
             </div>

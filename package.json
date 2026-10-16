@@ -11,20 +11,19 @@
     "server": "node --watch server/index.js",
     "client": "vite",
     "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "pwa:local": "concurrently \"npm run server\" \"npm run preview\"",
+    "test": "node --test",
     "start": "node server/index.js",
-    "db:init": "node database/initMysql.js",
-    "migrate:supabase": "node scripts/migrate-sqlite-to-supabase.js"
+    "db:init": "node database/initMysql.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.9.1",
-    "connect-pg-simple": "^10.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-mysql-session": "^3.0.3",
     "express-session": "^1.18.1",
-    "mysql2": "^3.24.6",
-    "pg": "^8.23.1"
+    "mysql2": "^3.24.6"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.0.0",
@@ -32,5 +31,8 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "vite": "^6.0.5"
+  },
+  "overrides": {
+    "mysql2": "^3.24.6"
   }
 }
