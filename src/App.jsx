@@ -36,6 +36,16 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const handleSessionExpired = () => {
+      setUser(null);
+      setPage('dashboard');
+      setLoading(false);
+    };
+    window.addEventListener('afristock:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('afristock:session-expired', handleSessionExpired);
+  }, []);
+
+  useEffect(() => {
     if (!toast) return undefined;
     const timer = setTimeout(() => setToast(null), 2800);
     return () => clearTimeout(timer);

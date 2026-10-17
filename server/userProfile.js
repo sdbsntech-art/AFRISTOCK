@@ -1,4 +1,9 @@
 export const DEFAULT_SHOP_NAME = 'AfriStock';
+export const SUPER_ADMIN_EMAIL = String(process.env.SUPER_ADMIN_EMAIL || 'sdbnstech@gmail.com')
+  .trim()
+  .toLowerCase();
+
+export const isSuperAdmin = (user) => String(user?.email || '').trim().toLowerCase() === SUPER_ADMIN_EMAIL;
 
 export const publicUser = (user) => {
   if (!user) return null;
@@ -16,7 +21,7 @@ export const publicUser = (user) => {
     phone: user.phone || '',
     shop_name,
     logo: user.logo || '',
-    role: user.role || 'seller',
+    role: isSuperAdmin(user) ? 'admin' : 'seller',
     status: user.status || 'active',
     must_change_password: Boolean(user.must_change_password),
     google_id: user.google_id || '',

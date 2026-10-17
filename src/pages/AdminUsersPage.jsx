@@ -788,16 +788,10 @@ export default function AdminUsersPage({ onToast, onOpenSellerProducts }) {
                 </div>
 
                 <div className="form-grid two-columns-grid">
-                  <label>
-                    Rôle du compte
-                    <select
-                      value={userForm.role}
-                      onChange={(e) => setUserForm({ ...userForm, role: e.target.value })}
-                    >
-                      <option value="seller">🛍️ Vendeur (Gestion de sa boutique)</option>
-                      <option value="admin">👑 Administrateur (Accès total)</option>
-                    </select>
-                  </label>
+                  <div className="security-notice full-width">
+                    <strong>Rôle du compte</strong>
+                    <span>Le compte propriétaire unique est protégé. Les autres comptes disposent uniquement des droits vendeur.</span>
+                  </div>
 
                   {editingUser ? (
                     <label>

@@ -27,7 +27,10 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
   const [search, setSearch] = useState('');
   const [family, setFamily] = useState(initialFamily || '');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [brandFilter, setBrandFilter] = useState('');
   const [stockFilter, setStockFilter] = useState('all');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
   const [form, setForm] = useState(emptyForm);
   const [showForm, setShowForm] = useState(false);
   const [stockModal, setStockModal] = useState(null);
@@ -62,7 +65,10 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
       if (search || globalSearch) params.set('search', search || globalSearch);
       if (family) params.set('family', family);
       if (categoryFilter) params.set('category', categoryFilter);
+      if (brandFilter.trim()) params.set('brand', brandFilter.trim());
       if (stockFilter !== 'all') params.set('stockStatus', stockFilter);
+      if (minPrice !== '') params.set('minPrice', minPrice);
+      if (maxPrice !== '') params.set('maxPrice', maxPrice);
       if (isAdmin && sellerFilter) params.set('seller_id', sellerFilter);
       const data = await apiRequest(`/products?${params.toString()}`);
       setProducts(data);
@@ -78,7 +84,7 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
 
   useEffect(() => {
     loadProducts();
-  }, [search, globalSearch, family, categoryFilter, stockFilter, sellerFilter]);
+  }, [search, globalSearch, family, categoryFilter, brandFilter, stockFilter, minPrice, maxPrice, sellerFilter]);
 
   const visibleCategories = useMemo(
     () => (family ? categories.filter((item) => item.family === family) : categories),
@@ -153,7 +159,7 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
 
       {!categories.length ? (
         <div className="empty-state panel">
-          <p>Créez d’abord une catégorie (ex. Écrans, Coques) pour classer vos articles.</p>
+          <p>Créez des catégories adaptées à votre boutique, par exemple Épicerie, Électronique ou Maison.</p>
           <button type="button" className="primary-button" onClick={() => onOpenSettings?.()}>Ouvrir les réglages</button>
         </div>
       ) : null}
@@ -181,19 +187,64 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
               ))}
             </select>
           )}
-          <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nom, référence, modèle…" />
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+          <input
+            type="search"
+            aria-label="Rechercher un article"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Nom, référence, modèle…"
+          />
+          <select aria-label="Filtrer par catégorie" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="">Toutes les catégories</option>
             {visibleCategories.map((category) => (
               <option key={category.id} value={category.name}>{category.name}</option>
             ))}
           </select>
-          <select value={stockFilter} onChange={(e) => setStockFilter(e.target.value)}>
+          <input
+            type="search"
+            aria-label="Filtrer par marque"
+            value={brandFilter}
+            onChange={(e) => setBrandFilter(e.target.value)}
+            placeholder="Marque (ex. Samsung, Nestlé)"
+          />
+          <select aria-label="Filtrer par état du stock" value={stockFilter} onChange={(e) => setStockFilter(e.target.value)}>
             <option value="all">Tous les stocks</option>
             <option value="available">Disponible</option>
             <option value="low">Stock faible</option>
             <option value="out">Rupture</option>
           </select>
+          <input
+            type="number"
+            min="0"
+            aria-label="Prix de vente minimum"
+            value={minPrice}
+            onChange={(e) => setMinPrice(e.target.value)}
+            placeholder="Prix min."
+          />
+          <input
+            type="number"
+            min="0"
+            aria-label="Prix de vente maximum"
+            value={maxPrice}
+            onChange={(e) => setMaxPrice(e.target.value)}
+            placeholder="Prix max."
+          />
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => {
+              setSearch('');
+              setFamily('');
+              setCategoryFilter('');
+              setBrandFilter('');
+              setStockFilter('all');
+              setMinPrice('');
+              setMaxPrice('');
+              setSellerFilter('');
+            }}
+          >
+            Effacer les filtres
+          </button>
         </div>
       </div>
 
@@ -247,8 +298,8 @@ export default function ProductsPage({ onToast, globalSearch, initialFamily = ''
                     ))}
                   </select>
                 </label>
-                <label>Marque<input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} required /></label>
-                <label>Modèle<input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} required /></label>
+                <label>Marque (facultatif)<input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} /></label>
+                <label>Modèle (facultatif)<input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></label>
                 <label>Référence<input value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></label>
                 <label>Compatible<input value={form.compatible_models} onChange={(e) => setForm({ ...form, compatible_models: e.target.value })} /></label>
                 <label>Quantité<input type="number" min="0" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })} /></label>

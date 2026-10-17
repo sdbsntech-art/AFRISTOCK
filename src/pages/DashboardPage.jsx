@@ -13,24 +13,41 @@ export default function DashboardPage({ onToast, onOpenStock, onNavigate }) {
   const [dashboard, setDashboard] = useState(null);
   const [stats, setStats] = useState(null);
   const [sales, setSales] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
+    let isCurrentRequest = true;
     const load = async () => {
+      setLoading(true);
+      setLoadError('');
+      setDashboard(null);
+      setStats(null);
+      setSales([]);
       try {
         const [data, statsData, salesData] = await Promise.all([
           apiRequest('/dashboard'),
           apiRequest(`/stats?range=${range}`),
           apiRequest(`/sales?range=${range}`),
         ]);
+        if (!isCurrentRequest) return;
         setDashboard(data);
         setStats(statsData);
         setSales(salesData);
       } catch (error) {
+        if (!isCurrentRequest) return;
+        setLoadError(error.message || 'Impossible de charger le tableau de bord.');
         onToast({ type: 'error', message: error.message });
+      } finally {
+        if (isCurrentRequest) setLoading(false);
       }
     };
     load();
-  }, [range, onToast]);
+    return () => {
+      isCurrentRequest = false;
+    };
+  }, [range, retryToken, onToast]);
 
   const salesLineData = useMemo(() => {
     const trend = stats?.trend?.length ? stats.trend : dashboard?.salesTrend || [];
@@ -42,8 +59,20 @@ export default function DashboardPage({ onToast, onOpenStock, onNavigate }) {
     }));
   }, [dashboard, stats]);
 
-  if (!dashboard) {
-    return <div className="panel">Chargement…</div>;
+  if (loading) {
+    return <div className="panel loading-panel" role="status" aria-live="polite">Chargement du tableau de bord…</div>;
+  }
+
+  if (loadError || !dashboard) {
+    return (
+      <section className="panel dashboard-error" role="alert">
+        <h2>Le tableau de bord est indisponible</h2>
+        <p>{loadError || 'Aucune donnée n’a été reçue du serveur.'}</p>
+        <button type="button" className="primary-button" onClick={() => setRetryToken((token) => token + 1)}>
+          Réessayer
+        </button>
+      </section>
+    );
   }
 
   return (

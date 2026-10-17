@@ -8,7 +8,7 @@ AfriStock tourne uniquement sur cet ordinateur. Les données sont enregistrées 
 2. Dans le dossier du projet, lancez `npm install`.
 3. Lancez `npm run dev`.
 4. Ouvrez `http://127.0.0.1:4173`.
-5. Créez le premier compte propriétaire. Après cette étape, les inscriptions publiques sont fermées ; l’administrateur peut ajouter des vendeurs.
+5. Configurez `SUPER_ADMIN_EMAIL` avec l’adresse du propriétaire (par défaut `sdbnstech@gmail.com`), puis créez le premier compte avec cette adresse. Après cette étape, les inscriptions publiques sont fermées ; le super-administrateur peut ajouter des vendeurs, mais aucun autre compte ne peut recevoir ses droits.
 
 Le secret de session et la base sont créés automatiquement dans `%LOCALAPPDATA%\AfriStock\` :
 
@@ -16,6 +16,15 @@ Le secret de session et la base sont créés automatiquement dans `%LOCALAPPDATA
 - `afristock.sqlite` — toutes les données (comptes, stock, ventes)
 
 Les permissions du dossier et de ses fichiers sont restreintes à votre compte Windows et au système. Gardez ce dossier privé. Ne le copiez pas dans Git ni sur un service public.
+
+Pour une installation PowerShell, définissez la variable avant de lancer l’application :
+
+```powershell
+$env:SUPER_ADMIN_EMAIL = "sdbnstech@gmail.com"
+npm run dev
+```
+
+Pour le déploiement, définissez la même variable dans la configuration d’environnement de l’hébergeur. Les anciens comptes avec le rôle `admin` ne conservent les droits super-administrateur que si leur adresse correspond à cette valeur.
 
 ## Commandes
 

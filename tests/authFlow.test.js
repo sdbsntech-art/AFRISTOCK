@@ -10,6 +10,7 @@ test('first owner setup and seller authentication work on local HTTP in producti
   const databasePath = path.join(directory, 'auth.sqlite');
   process.env.SQLITE_PATH = databasePath;
   process.env.SESSION_SECRET = crypto.randomBytes(48).toString('hex');
+  process.env.SUPER_ADMIN_EMAIL = 'owner@example.local';
   process.env.NODE_ENV = 'production';
 
   const { app, closeSessionStore, pool } = await import('../server/app.js');
@@ -59,6 +60,15 @@ test('first owner setup and seller authentication work on local HTTP in producti
   assert.deepEqual(initialStatus.data, { setupRequired: true, setupBlocked: false });
   assert.match(initialStatus.response.headers.get('cache-control') || '', /no-store/);
 
+  const unconfiguredOwner = await request('claim', '/api/signup', 'POST', {
+    first_name: 'Unknown',
+    last_name: 'Owner',
+    username: 'unknownowner',
+    email: 'unknown@example.local',
+    password: 'Unknown-Password-2026!',
+  });
+  assert.equal(unconfiguredOwner.status, 403);
+
   const owner = await request('owner', '/api/signup', 'POST', {
     first_name: 'Local',
     last_name: 'Owner',
@@ -68,11 +78,42 @@ test('first owner setup and seller authentication work on local HTTP in producti
   });
   assert.equal(owner.status, 201, JSON.stringify(owner.data));
   assert.equal(owner.data.user.role, 'admin');
+  assert.equal((await request('default-admin', '/api/login', 'POST', {
+    identifier: 'admin',
+    password: 'Admin@AfriStock2026!',
+  })).status, 401);
   const cookie = owner.response.headers.getSetCookie?.().join(';') || '';
   assert.match(cookie, /HttpOnly/i);
   assert.match(cookie, /SameSite=Lax/i);
   assert.doesNotMatch(cookie, /Secure/i);
   assert.deepEqual((await request('owner', '/api/auth/status')).data, { setupRequired: false, setupBlocked: false });
+
+  await pool.query(
+    'INSERT INTO categories (name, family, user_id) VALUES (?, ?, ?)',
+    ['Alimentation', 'Épicerie', owner.data.user.id],
+  );
+  const foodProduct = await request('owner', '/api/products', 'POST', {
+    name: 'Haricots',
+    category: 'Alimentation',
+    brand: 'Nestlé',
+    model: '',
+    reference: '',
+    quantity: 5,
+    price_buy: 100,
+    price_sale: 150,
+    threshold: 2,
+    location: '',
+    description: '',
+    compatible_models: '',
+  });
+  assert.equal(foodProduct.status, 201, JSON.stringify(foodProduct.data));
+  const filteredFood = await request(
+    'owner',
+    `/api/products?category=Alimentation&brand=${encodeURIComponent('nestlé')}&minPrice=0&maxPrice=150`,
+  );
+  assert.equal(filteredFood.status, 200);
+  assert.deepEqual(filteredFood.data.map((product) => product.name), ['Haricots']);
+  assert.equal((await request('owner', '/api/products?minPrice=200&maxPrice=100')).status, 400);
 
   const publicRegistration = await request('attacker', '/api/signup', 'POST', {
     first_name: 'Public',
@@ -96,6 +137,21 @@ test('first owner setup and seller authentication work on local HTTP in producti
   assert.equal(Boolean(seller.data.user.must_change_password), true);
   assert.ok(seller.data.temporaryPassword);
 
+  const secondAdmin = await request('owner', '/api/admin/users', 'POST', {
+    first_name: 'Second',
+    last_name: 'Admin',
+    username: 'secondadmin',
+    email: 'secondadmin@example.local',
+    role: 'admin',
+  });
+  assert.equal(secondAdmin.status, 403);
+
+  const sellerPromotion = await request('owner', `/api/admin/users/${seller.data.user.id}`, 'PUT', {
+    role: 'admin',
+  });
+  assert.equal(sellerPromotion.status, 403);
+  assert.equal((await request('owner', `/api/admin/users/${owner.data.user.id}`, 'DELETE')).status, 400);
+
   assert.equal((await request('wrong-login', '/api/login', 'POST', {
     identifier: 'localseller',
     password: 'incorrect-password',
@@ -109,6 +165,10 @@ test('first owner setup and seller authentication work on local HTTP in producti
   assert.equal(sellerLogin.data.user.role, 'seller');
   assert.equal(Boolean(sellerLogin.data.user.must_change_password), true);
   assert.equal((await request('seller', '/api/admin/users')).status, 403);
+  await pool.query("UPDATE users SET role = 'admin' WHERE username = ?", ['localseller']);
+  assert.equal((await request('seller', '/api/session')).data.user.role, 'seller');
+  assert.equal((await request('seller', '/api/admin/users')).status, 403);
+  await pool.query("UPDATE users SET role = 'seller' WHERE username = ?", ['localseller']);
 
   const passwordChange = await request('seller', '/api/auth/change-password', 'POST', {
     newPassword: 'Seller-Password-2026!',

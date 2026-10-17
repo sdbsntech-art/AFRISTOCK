@@ -172,7 +172,7 @@ export default function SettingsPage({ onToast, user, onUserUpdate }) {
 
       <div className="panel">
         <h3>Catégories</h3>
-        <p className="muted-note">Exemple : catégorie « Écran OLED », rayon « Pièces iPhone ».</p>
+        <p className="muted-note">Exemples : « Riz » dans le rayon « Épicerie » ou « Écran OLED » dans « Électronique ».</p>
         <form onSubmit={saveCategory} className="category-form inline-form">
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom de la catégorie" required />
           <input type="text" value={family} onChange={(e) => setFamily(e.target.value)} placeholder="Rayon" required maxLength={191} />

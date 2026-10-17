@@ -14,6 +14,9 @@ async function apiRequest(path, options = {}) {
   const data = contentType.includes('application/json') ? await response.json() : await response.text();
 
   if (!response.ok) {
+    if (response.status === 401 && path !== '/login' && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('afristock:session-expired'));
+    }
     const message = typeof data === 'string' ? data : data?.error || 'Une erreur est survenue.';
     throw new Error(message);
   }

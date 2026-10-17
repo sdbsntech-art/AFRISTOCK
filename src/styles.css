@@ -30,7 +30,15 @@ button, input, textarea, select {
   color: inherit;
 }
 
-button { cursor: pointer; }
+button {
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+
+button:focus-visible, a:focus-visible {
+  outline: 3px solid rgba(15, 118, 110, 0.45);
+  outline-offset: 2px;
+}
 
 input, textarea, select {
   width: 100%;
@@ -441,6 +449,23 @@ tbody tr:hover, .data-table tr:hover td { background: #f8fafc; }
   border-radius: 12px;
   border: 1px dashed var(--line);
 }
+
+.loading-panel {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.dashboard-error {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  border-color: #fecaca;
+}
+
+.dashboard-error h2 { margin: 0; font-size: 1.1rem; }
+.dashboard-error p { margin: 0; color: var(--muted); }
 
 .modal-backdrop {
   position: fixed;

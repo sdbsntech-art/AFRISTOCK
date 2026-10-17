@@ -2,7 +2,7 @@ import './loadEnv.js';
 import express from 'express';
 import session from 'express-session';
 import crypto from 'node:crypto';
-import { DEFAULT_SHOP_NAME, fullName, publicUser } from './userProfile.js';
+import { DEFAULT_SHOP_NAME, fullName, isSuperAdmin, publicUser, SUPER_ADMIN_EMAIL } from './userProfile.js';
 import { buildMonthlyAnalysis } from './reportEngine.js';
 import {
   hashPassword,
@@ -309,43 +309,11 @@ app.post('/api/login', limitAuthAttempts(loginAttemptKey), asyncRoute(async (req
     [identifier.toLowerCase(), identifier.toLowerCase()],
   );
 
-  // Si aucun utilisateur n'existe encore et qu'on tente de se connecter en admin, initialiser le compte
-  if (rows.length === 0 && (identifier.toLowerCase() === 'admin' || identifier.toLowerCase() === 'admin@afristock.com')) {
-    const [[countResult]] = await pool.query('SELECT COUNT(*) AS user_count FROM users');
-    if (Number(countResult?.user_count || 0) === 0) {
-      const defaultHash = await hashPassword('Admin@AfriStock2026!');
-      await pool.query(`
-        INSERT INTO users (
-          name, username, email, password, role, status,
-          first_name, last_name, phone, shop_name, must_change_password
-        ) VALUES (?, ?, ?, ?, 'admin', 'active', ?, ?, ?, ?, 0)
-      `, [
-        'Administrateur AfriStock',
-        'admin',
-        'admin@afristock.com',
-        defaultHash,
-        'Admin',
-        'AfriStock',
-        '+225 07 00 00 01',
-        'Direction AfriStock',
-      ]);
-      const [createdRows] = await pool.query('SELECT * FROM users WHERE LOWER(username) = ?', ['admin']);
-      rows = createdRows;
-    }
-  }
-
   const user = rows[0];
-
-  const isDefaultAdminMatch = Boolean(
-    user
-    && user.username === 'admin'
-    && (rawPass === 'Admin@AfriStock2026!' || pass === 'Admin@AfriStock2026!' || pass === 'admin' || pass === 'Admin2026!')
-  );
 
   const isValidPassword = Boolean(user) && (
     (await verifyPassword(rawPass, user.password))
     || (await verifyPassword(pass, user.password))
-    || isDefaultAdminMatch
   );
 
   if (!user || !isValidPassword) {
@@ -403,6 +371,9 @@ app.post('/api/signup', limitAuthAttempts(), asyncRoute(async (req, res, next) =
 
   if (!firstName || !lastName || !username || !email || !password) {
     return res.status(400).json({ error: 'Prénom, nom, identifiant, email et mot de passe sont obligatoires.' });
+  }
+  if (email !== SUPER_ADMIN_EMAIL) {
+    return res.status(403).json({ error: 'Seul le compte propriétaire configuré peut être créé lors de la première installation.' });
   }
   if (!validText(firstName, 128) || !validText(lastName, 128) || !validText(phone, 64)
     || !validText(shopName, 254)) {
@@ -668,11 +639,14 @@ app.post('/api/admin/users', requireAdmin, asyncRoute(async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   const phone = String(req.body?.phone || '').trim();
   const shopName = String(req.body?.shop_name || '').trim() || DEFAULT_SHOP_NAME;
-  const role = req.body?.role === 'admin' ? 'admin' : 'seller';
+  const role = 'seller';
   const rawPassword = String(req.body?.password || '').trim() || generateSecurePassword(12);
 
   if (!username || !email) {
     return res.status(400).json({ error: 'Identifiant et email sont obligatoires.' });
+  }
+  if ((req.body?.role !== undefined && req.body.role !== 'seller') || email === SUPER_ADMIN_EMAIL) {
+    return res.status(403).json({ error: 'Un seul super-administrateur est autorisé.' });
   }
 
   const [duplicate] = await pool.query('SELECT id FROM users WHERE email = ? OR username = ?', [email, username]);
@@ -727,10 +701,18 @@ app.put('/api/admin/users/:id', requireAdmin, asyncRoute(async (req, res) => {
   const email = String(req.body?.email ?? user.email).trim().toLowerCase();
   const phone = String(req.body?.phone ?? user.phone).trim();
   const shopName = String(req.body?.shop_name ?? user.shop_name).trim() || DEFAULT_SHOP_NAME;
-  const role = req.body?.role ? (req.body.role === 'admin' ? 'admin' : 'seller') : user.role;
+  const role = isSuperAdmin(user) ? 'admin' : 'seller';
   const status = ['active', 'inactive', 'suspended'].includes(req.body?.status) ? req.body.status : user.status;
 
-  // Éviter de désactiver son propre compte admin
+  if (req.body?.role !== undefined && req.body.role !== (isSuperAdmin(user) ? 'admin' : 'seller')) {
+    return res.status(403).json({ error: 'Le rôle super-administrateur est réservé au propriétaire.' });
+  }
+  if (email === SUPER_ADMIN_EMAIL && !isSuperAdmin(user)) {
+    return res.status(403).json({ error: 'Cette adresse est réservée au super-administrateur.' });
+  }
+  if (isSuperAdmin(user) && (email !== SUPER_ADMIN_EMAIL || status !== 'active')) {
+    return res.status(400).json({ error: 'Le compte super-administrateur ne peut pas être renommé ni désactivé.' });
+  }
   if (userId === sessionUser.id && status !== 'active') {
     return res.status(400).json({ error: 'Vous ne pouvez pas désactiver votre propre compte administrateur.' });
   }
@@ -779,7 +761,6 @@ app.post('/api/admin/users/:id/reset-password', requireAdmin, asyncRoute(async (
   const userId = Number(req.params.id);
   const user = await loadUser(userId);
   if (!user) return res.status(404).json({ error: 'Utilisateur introuvable.' });
-
   // Génération automatique d'un mot de passe sécurisé à haute entropie
   const tempPassword = generateSecurePassword(12);
   const hashed = await hashPassword(tempPassword);
@@ -823,6 +804,9 @@ app.delete('/api/admin/users/:id', requireAdmin, asyncRoute(async (req, res) => 
 
   const user = await loadUser(userId);
   if (!user) return res.status(404).json({ error: 'Utilisateur introuvable.' });
+  if (isSuperAdmin(user)) {
+    return res.status(403).json({ error: 'Le compte super-administrateur ne peut pas être supprimé.' });
+  }
 
   await logActivity(pool, {
     userId: sessionUser.id,
@@ -1019,6 +1003,18 @@ const mapProduct = (product) => ({
 app.get('/api/products', requireAuth, asyncRoute(async (req, res) => {
   const sessionUser = getSessionUser(req);
   const { search, category, family, brand, stockStatus, minPrice, maxPrice, seller_id } = req.query;
+  const hasMinPrice = minPrice !== undefined && minPrice !== '';
+  const hasMaxPrice = maxPrice !== undefined && maxPrice !== '';
+  const minPriceValue = hasMinPrice ? Number(minPrice) : null;
+  const maxPriceValue = hasMaxPrice ? Number(maxPrice) : null;
+
+  if ((hasMinPrice && (!Number.isFinite(minPriceValue) || minPriceValue < 0))
+    || (hasMaxPrice && (!Number.isFinite(maxPriceValue) || maxPriceValue < 0))) {
+    return res.status(400).json({ error: 'Les prix de filtre doivent être supérieurs ou égaux à zéro.' });
+  }
+  if (hasMinPrice && hasMaxPrice && minPriceValue > maxPriceValue) {
+    return res.status(400).json({ error: 'Le prix minimum ne peut pas dépasser le prix maximum.' });
+  }
 
   const conditions = [];
   const params = [];
@@ -1055,19 +1051,19 @@ app.get('/api/products', requireAuth, asyncRoute(async (req, res) => {
     params.push(family);
   }
   if (brand) {
-    conditions.push('p.brand = ?');
-    params.push(brand);
+    conditions.push('LOWER(p.brand) = ?');
+    params.push(String(brand).trim().toLowerCase());
   }
   if (stockStatus === 'low') conditions.push('p.quantity > 0 AND p.quantity <= p.threshold');
   if (stockStatus === 'out') conditions.push('p.quantity <= 0');
   if (stockStatus === 'available') conditions.push('p.quantity > p.threshold');
-  if (minPrice && Number.isFinite(Number(minPrice))) {
+  if (hasMinPrice) {
     conditions.push('p.price_sale >= ?');
-    params.push(Number(minPrice));
+    params.push(minPriceValue);
   }
-  if (maxPrice && Number.isFinite(Number(maxPrice))) {
+  if (hasMaxPrice) {
     conditions.push('p.price_sale <= ?');
-    params.push(Number(maxPrice));
+    params.push(maxPriceValue);
   }
 
   const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -1130,8 +1126,8 @@ app.post('/api/products', requireAuth, asyncRoute(async (req, res) => {
   const sessionUser = getSessionUser(req);
   const p = readProductInput(req.body || {});
 
-  if (!p.name || !p.category || !p.brand || !p.model) {
-    return res.status(400).json({ error: 'Nom, catégorie, marque et modèle sont obligatoires.' });
+  if (!p.name || !p.category) {
+    return res.status(400).json({ error: 'Le nom et la catégorie sont obligatoires.' });
   }
   if (![p.quantity, p.threshold, p.price_buy, p.price_sale].every(validNonNegativeInt)) {
     return res.status(400).json({ error: 'Quantité, seuil et prix doivent être des entiers positifs ou nuls.' });
@@ -1211,8 +1207,8 @@ app.put('/api/products/:id', requireAuth, asyncRoute(async (req, res) => {
   if (sessionUser.role !== 'admin' && existing[0].user_id !== sessionUser.id) {
     return res.status(403).json({ error: 'Vous n’êtes pas autorisé à modifier ce produit.' });
   }
-  if (!p.name || !p.category || !p.brand || !p.model) {
-    return res.status(400).json({ error: 'Nom, catégorie, marque et modèle sont obligatoires.' });
+  if (!p.name || !p.category) {
+    return res.status(400).json({ error: 'Le nom et la catégorie sont obligatoires.' });
   }
   if (![p.quantity, p.threshold, p.price_buy, p.price_sale].every(validNonNegativeInt)) {
     return res.status(400).json({ error: 'Quantité, seuil et prix doivent être des entiers positifs ou nuls.' });
